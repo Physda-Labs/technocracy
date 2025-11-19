@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Technocracy</title>
+    <title>Mini World Simulation - Zoom & Pan</title>
     <style>
         /* RESET & BASIC STYLING */
         * {
@@ -13,7 +13,7 @@
         }
 
         body {
-            background-color: #222;
+            background-color: #1a1a1a;
             overflow: hidden; /* Prevent scrollbars */
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
@@ -33,6 +33,7 @@
             z-index: 1000;
             width: 90%;
             max-width: 600px;
+            pointer-events: auto; /* Ensure UI is clickable */
         }
 
         #question-input {
@@ -68,10 +69,25 @@
             transform: scale(0.95);
         }
 
+        /* INSTRUCTIONS */
+        #instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.5);
+            pointer-events: none;
+            user-select: none;
+            font-size: 14px;
+        }
+
         /* CANVAS */
         canvas {
             display: block;
-            background-color: #333333; /* Requested Dark Background */
+            background-color: #333333;
+            cursor: grab;
+        }
+        canvas:active {
+            cursor: grabbing;
         }
     </style>
 </head>
@@ -83,6 +99,10 @@
         <button id="ask-btn">Ask</button>
     </div>
 
+    <div id="instructions">
+        Mouse Wheel to Zoom • Click & Drag to Pan
+    </div>
+
     <!-- GAME CANVAS -->
     <canvas id="gameCanvas"></canvas>
 
@@ -91,20 +111,20 @@
         // CONFIGURATION & ASSETS
         // ==========================================
         
-        // PLACE YOUR IMAGE FILE HERE
-        // Ensure your file is named 'sprite.png' and is in the same folder as this .html file.
-        // It should be a 9x4 grid (9 columns, 4 rows).
-        const SPRITE_SRC = './sprite.png'; 
+        // Ensure your file is named 'sprite.png' and is in the same folder.
+        const SPRITE_SRC = './walk.png'; 
 
-        // CONSTANTS
+        // WORLD SETTINGS (Landscape)
+        const WORLD_WIDTH = 3000;
+        const WORLD_HEIGHT = 1500;
         const NUM_CHARACTERS = 100;
-        // Reduced size for "Smaller" request
-        const CHAR_WIDTH = 48;  
-        const CHAR_HEIGHT = 48; 
+        
+        // VISUAL SETTINGS
+        const CHAR_WIDTH = 64;  
+        const CHAR_HEIGHT = 64; 
         const HITBOX_RADIUS = 10; 
-        // Reduced speed for "Slower" request
-        const SPEED = 0.6;
-        const ANIMATION_SPEED = 0.2;
+        const SPEED = 0.5;
+        const ANIMATION_SPEED = 0.15;
 
         // ==========================================
         // CLASSES
@@ -112,7 +132,6 @@
 
         /**
          * BRAIN: Handles the "Thinking" logic. 
-         * Currently random, ready for LLM integration.
          */
         class Brain {
             constructor() {
@@ -150,42 +169,42 @@
                 
                 // Animation State
                 this.frameIndex = 0;
-                this.row = 2; // 0:Up, 1:Left, 2:Down, 3:Right
+                this.row = 2; 
                 this.tickCount = 0;
                 
                 // Interaction State
-                this.state = 'WANDERING'; // WANDERING, PREPARING, TALKING
+                this.state = 'WANDERING'; // WANDERING, TALKING
                 this.speechText = "";
                 this.speechTimer = 0;
-                this.speechOpacity = 0;
+                
+                // Store timeout ID so we can cancel if needed
+                this.pendingSpeechTimeout = null;
             }
 
-            update(canvasWidth, canvasHeight, allCharacters) {
-                // Handle Behavior States
-                if (this.state === 'WANDERING') {
-                    this.move(canvasWidth, canvasHeight);
-                    this.handleCollisions(allCharacters);
-                    this.updateAnimation();
-                } else if (this.state === 'PREPARING') {
-                    this.updateAnimation(); // Idle animation
-                } else if (this.state === 'TALKING') {
-                    // Count down speech visibility
+            update(allCharacters) {
+                // MOVEMENT LOGIC: Always run, even when talking
+                this.move();
+                this.handleCollisions(allCharacters);
+                this.updateAnimation();
+
+                // SPEECH LOGIC: Check if speech time is up
+                if (this.state === 'TALKING') {
                     if (Date.now() > this.speechTimer) {
                         this.state = 'WANDERING';
-                        this.pickNewRandomDirection();
+                        this.speechText = "";
                     }
                 }
             }
 
-            move(width, height) {
+            move() {
                 this.x += this.vx;
                 this.y += this.vy;
 
-                // Boundary Bounce
+                // Boundary Bounce (Against WORLD size, not Canvas size)
                 if (this.x < HITBOX_RADIUS) { this.x = HITBOX_RADIUS; this.vx *= -1; }
-                if (this.x > width - HITBOX_RADIUS) { this.x = width - HITBOX_RADIUS; this.vx *= -1; }
+                if (this.x > WORLD_WIDTH - HITBOX_RADIUS) { this.x = WORLD_WIDTH - HITBOX_RADIUS; this.vx *= -1; }
                 if (this.y < HITBOX_RADIUS) { this.y = HITBOX_RADIUS; this.vy *= -1; }
-                if (this.y > height - HITBOX_RADIUS) { this.y = height - HITBOX_RADIUS; this.vy *= -1; }
+                if (this.y > WORLD_HEIGHT - HITBOX_RADIUS) { this.y = WORLD_HEIGHT - HITBOX_RADIUS; this.vy *= -1; }
 
                 // Random direction change occasionally
                 if (Math.random() < 0.01) this.pickNewRandomDirection();
@@ -225,14 +244,12 @@
             }
 
             updateAnimation() {
-                // Determine Row based on Velocity
                 if (Math.abs(this.vx) > Math.abs(this.vy)) {
                     this.row = this.vx > 0 ? 3 : 1; // Right : Left
                 } else {
                     this.row = this.vy > 0 ? 2 : 0; // Down : Up
                 }
 
-                // Cycle Frames
                 this.tickCount += ANIMATION_SPEED;
                 if (this.tickCount > 1) {
                     this.tickCount = 0;
@@ -244,25 +261,29 @@
             ask(question) {
                 const response = this.brain.thinkOfAnswer(question);
                 
-                // Staggered Delay: 0 to 2000ms
-                const delay = Math.random() * 2000;
-                
-                this.state = 'PREPARING';
-                // Stop moving
-                this.vx = 0;
-                this.vy = 0;
+                // Clear any pending speech from previous clicks
+                if (this.pendingSpeechTimeout) clearTimeout(this.pendingSpeechTimeout);
 
-                setTimeout(() => {
-                    this.speechText = response;
-                    this.state = 'TALKING';
-                    this.speechTimer = Date.now() + 5000; // Show for 5 seconds
+                // Staggered Delay: 0 to 4000ms (Wider spread)
+                const delay = Math.random() * 4000;
+                
+                this.pendingSpeechTimeout = setTimeout(() => {
+                    this.startTalking(response);
                 }, delay);
             }
 
+            startTalking(response) {
+                this.state = 'TALKING';
+                this.speechText = response;
+                this.speechTimer = Date.now() + 5000; // Show for 5 seconds
+                
+                // MOVEMENT CONTINUES: No longer setting vx/vy to 0
+            }
+
             draw(ctx) {
-                // Calculate Perspective Scale
-                // Characters at top (y=0) are 70% size, at bottom (y=height) are 110% size
-                const perspectiveScale = 0.7 + (this.y / ctx.canvas.height) * 0.4;
+                // Calculate Perspective Scale based on WORLD height
+                // Top of world = 0.6 scale, Bottom of world = 1.2 scale
+                const perspectiveScale = 0.6 + (this.y / WORLD_HEIGHT) * 0.6;
                 
                 const currentW = CHAR_WIDTH * perspectiveScale;
                 const currentH = CHAR_HEIGHT * perspectiveScale;
@@ -274,28 +295,24 @@
                 ctx.fill();
 
                 // 2. Draw Sprite or Fallback
-                // Check if image is loaded AND has natural dimensions (meaning file exists)
                 if (this.image && this.image.complete && this.image.naturalWidth > 0) {
-                    // Source coordinates from sprite sheet (Assumes 64px frames in source)
-                    // We assume standard frame size 64x64 for calculation, adjust if your PNG is different
                     const frameW = this.image.width / 9;
                     const frameH = this.image.height / 4;
                     
                     const sx = this.frameIndex * frameW; 
                     const sy = this.row * frameH; 
 
-                    // Destination (Scaled)
                     const dx = this.x - (currentW / 2); 
-                    const dy = this.y - (currentH * 0.9); // Anchor near bottom of sprite
+                    const dy = this.y - (currentH * 0.9);
                     
                     ctx.drawImage(this.image, sx, sy, frameW, frameH, dx, dy, currentW, currentH);
                 } else {
-                    // Fallback Box (If image missing)
+                    // Fallback Box
                     ctx.fillStyle = "#4488ff";
                     ctx.fillRect(this.x - (15 * perspectiveScale), this.y - (30 * perspectiveScale), 30 * perspectiveScale, 60 * perspectiveScale);
                 }
 
-                // 3. Draw Speech Bubble (if Talking)
+                // 3. Draw Speech Bubble
                 if (this.state === 'TALKING') {
                     this.drawSpeechBubble(ctx, currentH, perspectiveScale);
                 }
@@ -303,14 +320,15 @@
 
             drawSpeechBubble(ctx, charHeight, scale) {
                 const text = this.speechText;
-                ctx.font = `${12 * scale + 4}px Arial`; // Scale font slightly
+                // Scale font but keep it readable (min 12px)
+                const fontSize = Math.max(12, 12 * scale + 4);
+                ctx.font = `${fontSize}px Arial`; 
                 const textMetrics = ctx.measureText(text);
                 const padding = 10 * scale;
                 const bubbleWidth = textMetrics.width + (padding * 2);
-                const bubbleHeight = 20 * scale + 10;
+                const bubbleHeight = fontSize * 1.5 + 10;
                 
                 const bubbleX = this.x - bubbleWidth / 2;
-                // Position bubble above the scaled character
                 const bubbleY = this.y - charHeight - bubbleHeight - 5;
 
                 // Bubble background
@@ -318,13 +336,12 @@
                 ctx.strokeStyle = "#333";
                 ctx.lineWidth = 2;
                 
-                // Round Rect Bubble
                 ctx.beginPath();
                 ctx.roundRect(bubbleX, bubbleY, bubbleWidth, bubbleHeight, 10);
                 ctx.fill();
                 ctx.stroke();
 
-                // Triangle Pointer
+                // Pointer
                 ctx.beginPath();
                 ctx.moveTo(this.x, bubbleY + bubbleHeight);
                 ctx.lineTo(this.x - 5, bubbleY + bubbleHeight + 5);
@@ -340,7 +357,7 @@
         }
 
         /**
-         * WORLD: Manages the game loop and global state.
+         * WORLD: Manages the game loop, global state, and Camera.
          */
         class World {
             constructor() {
@@ -349,15 +366,25 @@
                 this.characters = [];
                 this.spriteImage = new Image();
                 
-                this.resize();
+                // Camera State
+                this.camera = {
+                    x: WORLD_WIDTH / 2,
+                    y: WORLD_HEIGHT / 2,
+                    zoom: 1,
+                    minZoom: 0.5, // Will be recalculated on resize
+                    maxZoom: 3,
+                    isDragging: false,
+                    dragStartX: 0,
+                    dragStartY: 0
+                };
+
+                this.resize(); // This will now set the correct minZoom immediately
                 window.addEventListener('resize', () => this.resize());
+                this.setupInputs();
 
                 // Load Assets
                 this.spriteImage.src = SPRITE_SRC;
-                // Simple log to help debugging
-                this.spriteImage.onload = () => console.log("Sprite loaded successfully");
-                this.spriteImage.onerror = () => console.log("Sprite failed to load - using fallback rectangles");
-
+                
                 // Initialize Characters
                 this.initCharacters();
 
@@ -370,15 +397,104 @@
                 requestAnimationFrame(this.animate);
             }
 
+            setupInputs() {
+                // Mouse Wheel Zoom
+                this.canvas.addEventListener('wheel', (e) => {
+                    e.preventDefault();
+                    const zoomSensitivity = 0.001;
+                    
+                    // Calculate new zoom
+                    let newZoom = this.camera.zoom - (e.deltaY * zoomSensitivity * this.camera.zoom);
+                    
+                    // Clamp to min/max
+                    newZoom = Math.max(newZoom, this.camera.minZoom);
+                    newZoom = Math.min(newZoom, this.camera.maxZoom);
+                    
+                    this.camera.zoom = newZoom;
+                    
+                    // Re-clamp position to ensure we didn't zoom out past edges
+                    this.clampCamera();
+                    
+                }, { passive: false });
+
+                // Mouse Drag Pan
+                this.canvas.addEventListener('mousedown', (e) => {
+                    this.camera.isDragging = true;
+                    this.camera.dragStartX = e.clientX;
+                    this.camera.dragStartY = e.clientY;
+                });
+
+                window.addEventListener('mousemove', (e) => {
+                    if (this.camera.isDragging) {
+                        const dx = e.clientX - this.camera.dragStartX;
+                        const dy = e.clientY - this.camera.dragStartY;
+                        
+                        // Move camera opposite to drag direction
+                        this.camera.x -= dx / this.camera.zoom;
+                        this.camera.y -= dy / this.camera.zoom;
+                        
+                        this.camera.dragStartX = e.clientX;
+                        this.camera.dragStartY = e.clientY;
+
+                        // Enforce boundaries
+                        this.clampCamera();
+                    }
+                });
+
+                window.addEventListener('mouseup', () => {
+                    this.camera.isDragging = false;
+                });
+            }
+
+            // Helper to keep camera inside world bounds
+            clampCamera() {
+                // Calculate visible width/height in world units
+                const visibleWidth = this.canvas.width / this.camera.zoom;
+                const visibleHeight = this.canvas.height / this.camera.zoom;
+
+                // Calculate min and max x/y coordinates for the camera center
+                // We want: camera.x - visibleWidth/2 >= 0  => camera.x >= visibleWidth/2
+                // We want: camera.x + visibleWidth/2 <= WORLD_WIDTH => camera.x <= WORLD_WIDTH - visibleWidth/2
+                
+                const minX = visibleWidth / 2;
+                const maxX = WORLD_WIDTH - visibleWidth / 2;
+                const minY = visibleHeight / 2;
+                const maxY = WORLD_HEIGHT - visibleHeight / 2;
+
+                // If the world is smaller than the viewport (shouldn't happen due to minZoom, but good for safety), 
+                // center it.
+                if (minX > maxX) this.camera.x = WORLD_WIDTH / 2;
+                else this.camera.x = Math.max(minX, Math.min(this.camera.x, maxX));
+
+                if (minY > maxY) this.camera.y = WORLD_HEIGHT / 2;
+                else this.camera.y = Math.max(minY, Math.min(this.camera.y, maxY));
+            }
+
             resize() {
                 this.canvas.width = window.innerWidth;
                 this.canvas.height = window.innerHeight;
+
+                // Calculate Minimum Zoom to ensure World covers Screen
+                // We want the world to fill the screen, so we can't zoom out to see the void.
+                const minZoomX = this.canvas.width / WORLD_WIDTH;
+                const minZoomY = this.canvas.height / WORLD_HEIGHT;
+                
+                // We pick the larger of the two ratios. 
+                // This ensures that the 'short' side of the world always fills the screen.
+                this.camera.minZoom = Math.max(minZoomX, minZoomY);
+                
+                // Adjust current zoom if it violates new min
+                if (this.camera.zoom < this.camera.minZoom) {
+                    this.camera.zoom = this.camera.minZoom;
+                }
+                
+                this.clampCamera();
             }
 
             initCharacters() {
                 for (let i = 0; i < NUM_CHARACTERS; i++) {
-                    const x = Math.random() * this.canvas.width;
-                    const y = Math.random() * this.canvas.height;
+                    const x = Math.random() * WORLD_WIDTH;
+                    const y = Math.random() * WORLD_HEIGHT;
                     this.characters.push(new Character(i, x, y, this.spriteImage));
                 }
             }
@@ -390,28 +506,54 @@
 
                 // Trigger thinking process for all characters
                 this.characters.forEach(char => char.ask(question));
-                
-                // Optional: Clear input
-                // input.value = ''; 
             }
 
             animate(timestamp) {
                 const deltaTime = timestamp - this.lastTime;
                 this.lastTime = timestamp;
 
-                // Clear Canvas
+                // 1. Update Logic (Physics)
+                // Passing empty array to 'others' for now to simplify this step 
+                // or pass specific nearby chunks for optimization, but for 100 chars, O(N^2) is fine.
+                this.characters.forEach(char => char.update(this.characters));
+
+                // 2. Clear Screen
                 this.ctx.fillStyle = "#333333";
                 this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-                // Update Physics
-                this.characters.forEach(char => char.update(this.canvas.width, this.canvas.height, this.characters));
+                // 3. Apply Camera Transform
+                this.ctx.save();
+                
+                // Translate to center of screen
+                this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
+                // Scale
+                this.ctx.scale(this.camera.zoom, this.camera.zoom);
+                // Translate to camera position (negative because moving camera right moves world left)
+                this.ctx.translate(-this.camera.x, -this.camera.y);
 
-                // Sort for Z-Index (2.5D Perspective)
-                // Characters with higher Y (lower on screen) drawn last (on top)
+                // 4. Draw World Borders (Visual Aid)
+                this.ctx.strokeStyle = "#444";
+                this.ctx.lineWidth = 5;
+                this.ctx.strokeRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+                
+                // Grid lines for perspective reference
+                this.ctx.strokeStyle = "#3a3a3a";
+                this.ctx.lineWidth = 1;
+                for(let i=0; i<=WORLD_WIDTH; i+=100) {
+                    this.ctx.beginPath(); this.ctx.moveTo(i, 0); this.ctx.lineTo(i, WORLD_HEIGHT); this.ctx.stroke();
+                    this.ctx.beginPath(); this.ctx.moveTo(0, i); this.ctx.lineTo(WORLD_WIDTH, i); this.ctx.stroke();
+                }
+
+                // 5. Sort & Draw Characters
+                // Sort logic remains simple based on Y
                 this.characters.sort((a, b) => a.y - b.y);
 
-                // Draw
+                // Optimization: Only draw characters inside the viewport?
+                // For 100 characters, it's okay to just draw all.
                 this.characters.forEach(char => char.draw(this.ctx));
+
+                // 6. Restore Context for next frame
+                this.ctx.restore();
 
                 requestAnimationFrame(this.animate);
             }
