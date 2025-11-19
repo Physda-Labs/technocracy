@@ -4,528 +4,424 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Technocracy</title>
-    <!-- 1. Load Tailwind CSS for styling the UI -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 2. Load p5.js for the canvas animation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
-    
-    <!-- 3. Custom styles for the page -->
     <style>
+        /* RESET & BASIC STYLING */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            /* Dark font that works well on a dark background */
-            font-family: 'Inter', sans-serif;
-            overflow: hidden; /* Prevent scrolling */
+            background-color: #222;
+            overflow: hidden; /* Prevent scrollbars */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-        /* Style the canvas container */
-        #canvas-container {
-            width: 100%;
-            height: 100%;
+
+        /* UI OVERLAY */
+        #ui-layer {
             position: absolute;
-            top: 0;
-            left: 0;
-            z-index: 1; /* Behind the UI */
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 25px;
+            border-radius: 30px;
+            display: flex;
+            gap: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            z-index: 1000;
+            width: 90%;
+            max-width: 600px;
         }
+
+        #question-input {
+            flex-grow: 1;
+            padding: 10px 15px;
+            border: 2px solid #ddd;
+            border-radius: 20px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        #question-input:focus {
+            border-color: #6a11cb;
+        }
+
+        #ask-btn {
+            padding: 10px 25px;
+            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+            color: white;
+            border: none;
+            border-radius: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+        }
+
+        #ask-btn:hover {
+            opacity: 0.9;
+        }
+
+        #ask-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* CANVAS */
         canvas {
             display: block;
-            /* Clicks are no longer needed on individual characters */
-            /* cursor: pointer; */ 
+            background-color: #333333; /* Requested Dark Background */
         }
     </style>
 </head>
-<body class="bg-gray-900 text-gray-200">
+<body>
 
-    <!-- 4. The p5.js canvas will be inserted here by the script -->
-    <div id="canvas-container"></div>
-
-    <!-- 5. The UI elements, floating on top of the canvas -->
-    <div class="relative z-10 p-6 max-w-lg mx-auto text-center">
-        <h1 class="text-3xl font-bold text-white mb-2">Technocracy</h1>
-        <p class="text-gray-400 mb-4">Ask a question, and 100 tiny warriors will share their thoughts. Click "Ask" to see their opinions!</p>
-        
-        <div class="flex flex-col sm:flex-row gap-2">
-            <input 
-                type="text" 
-                id="question-input" 
-                placeholder="Ask your question here..."
-                class="flex-grow bg-gray-700 border border-gray-600 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-            <button 
-                id="ask-button"
-                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transition duration-200 transform hover:scale-105"
-            >
-                Ask the Horde
-            </button>
-
-            <button 
-                id="toggle-bubbles-button"
-                class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition duration-200"
-            >
-                Toggle Bubbles
-            </button>
-        </div>
+    <!-- UI CONTAINER -->
+    <div id="ui-layer">
+        <input type="text" id="question-input" placeholder="Ask the villagers something...">
+        <button id="ask-btn">Ask</button>
     </div>
 
-    <!-- 6. The main p5.js script -->
+    <!-- GAME CANVAS -->
+    <canvas id="gameCanvas"></canvas>
+
     <script>
-        // --- "PATH A" OPINION DATABASE ---
-        // Opinions are now very short to fit in small bubbles
-        const opinionDatabase = {
-            positive: [
-                "Yes!",
-                "Glory!",
-                "Brilliant!",
-                "Go!",
-                "A-ha!",
-                "Huzzah!",
-            ],
-            negative: [
-                "No!",
-                "Madness!",
-                "Regret!",
-                "Bah!",
-                "Never!",
-                "Ugh."
-            ],
-            neutral: [
-                "Hmm...",
-                "Maybe.",
-                "Meh.",
-                "...",
-                "Wait.",
-                "Eh."
-            ],
-            chaotic: [
-                "WAAAGH!",
-                "Loot!",
-                "Boom!",
-                "RAWR!",
-                "Mud!",
-                "Heh!"
-            ]
-        };
-
-        // --- GLOBAL VARIABLES ---
-        let characters = [];
-        const characterCount = 100;
+        // ==========================================
+        // CONFIGURATION & ASSETS
+        // ==========================================
         
-        // HTML element references
-        let askButton, toggleBubblesButton, canvasContainer, canvas;
-        let canvasOffsetX = 0;
-        let canvasOffsetY = 0;
+        // PLACE YOUR IMAGE FILE HERE
+        // Ensure your file is named 'sprite.png' and is in the same folder as this .html file.
+        // It should be a 9x4 grid (9 columns, 4 rows).
+        const SPRITE_SRC = './sprite.png'; 
 
-        let areBubblesVisible = false; // Global toggle for bubbles
+        // CONSTANTS
+        const NUM_CHARACTERS = 100;
+        // Reduced size for "Smaller" request
+        const CHAR_WIDTH = 48;  
+        const CHAR_HEIGHT = 48; 
+        const HITBOX_RADIUS = 10; 
+        // Reduced speed for "Slower" request
+        const SPEED = 0.6;
+        const ANIMATION_SPEED = 0.2;
 
-        // Camera and World Variables
-        let currentScale = 1;
-        let originX = 0;
-        let originY = 0;
-        let worldWidth, worldHeight;
-        let minZoom;
+        // ==========================================
+        // CLASSES
+        // ==========================================
 
-        let spriteImg; 
-
-        function preload() {
-            // Make sure to have these files in the same folder as your
-            // index.html, or provide the correct path.
-            // Using placeholder images for now.
-            spriteImg = loadImage('walk.png');
-    
-        }
-
-        // --- P5.JS SETUP FUNCTION ---
-        // Runs once when the page loads
-        function setup() {
-            // Create the canvas to fill the window and parent it
-            canvasContainer = document.getElementById('canvas-container');
-            canvas = createCanvas(windowWidth, windowHeight);
-            canvas.parent(canvasContainer);
-            
-            // Set default drawing modes
-            rectMode(CORNER);
-            textAlign(CENTER, CENTER);
-            textSize(12);
-
-            // --- Set up world and camera ---
-            worldWidth = windowWidth * 3;
-            worldHeight = windowHeight * 3;
-            originX = windowWidth / 2; // Start camera centered
-            originY = windowHeight / 2;
-
-            // Calculate the minimum scale needed to make the world fill the window
-            let minScaleX = windowWidth / worldWidth;
-            let minScaleY = windowHeight / worldHeight;
-            minZoom = max(minScaleX, minScaleY); // Use the larger ratio to ensure both fit
-            currentScale = minZoom; // <-- OPTIONAL: Start zoomed out to see the whole world
-
-            // Get canvas offset
-            let canvasRect = canvas.elt.getBoundingClientRect();
-            canvasOffsetX = canvasRect.left;
-            canvasOffsetY = canvasRect.top;
-
-            // --- Create 100 unique characters ---
-            for (let i = 0; i < characterCount; i++) {
-                characters.push(new Character());
-            }
-            
-            // --- Get HTML elements and attach listeners ---
-            askButton = document.getElementById('ask-button');
-            toggleBubblesButton = document.getElementById('toggle-bubbles-button'); // <-- ADDED
-
-            // When "Ask" is clicked, generate new opinions for everyone
-            askButton.addEventListener('click', () => {
-                areBubblesVisible = true; // <-- ADDED: Show bubbles on new ask
-                toggleBubblesButton.innerText = "Hide Bubbles"; // <-- ADDED: Update toggle text
-                
-                for (let char of characters) {
-                    char.generateNewOpinion();
-                    char.showOpinion = true; // Make the bubble appear
-                }
-                // Give user feedback
-                askButton.innerText = "They are thinking...";
-                setTimeout(() => {
-                    askButton.innerText = "Ask Again?";
-                }, 1000);
-            });
-
-            // --- ADDED THIS NEW LISTENER ---
-            toggleBubblesButton.addEventListener('click', () => {
-                // Flip the boolean
-                areBubblesVisible = !areBubblesVisible; 
-                
-                // Update the button text
-                if (areBubblesVisible) {
-                    toggleBubblesButton.innerText = "Hide Bubbles";
-                } else {
-                    toggleBubblesButton.innerText = "Show Bubbles";
-                }
-            });
-        }
-
-        // --- P5.JS DRAW FUNCTION ---
-        // Runs 60 times per second in a loop
-        function draw() {
-            // 1. Draw the dark landscape (the whole canvas is the floor now)
-            background(30, 25, 40); // Dark grayish-purple floor
-            
-            // Zoom and Pan the Camera
-            push(); // Save the canvas's original state (pre-camera)
-            translate(originX, originY);
-            scale(currentScale);
-
-            // (Optional) Draw a faint border for the world
-            noFill();
-            stroke(255, 50); // Faint white
-            strokeWeight(10 / currentScale); // Make stroke thinner as you zoom out
-            rect(-worldWidth / 2, -worldHeight / 2, worldWidth, worldHeight);
-            
-            // 2. Draw the dark floor
-            noStroke();
-            // fill(30, 25, 40); // <-- This is now the background
-            // rectMode(CORNER); // <-- No longer need to draw the floor rect
-            // rect(0, floorY, width, floorHeight); // <-- REMOVED
-            
-            // --- 2.5D ILLUSION ---
-            // Sort characters by their y-position.
-            // This makes characters "lower" on screen draw on top of
-            // characters "higher" on screen, creating a sense of depth.
-            characters.sort((a, b) => a.y - b.y);
-
-            // 3. Update and display every character
-            for (let char of characters) {
-                char.update();
-                char.display();
-            }
-
-            pop(); // Restore the canvas state (so UI is not zoomed/panned)
-        }
-        
-        // --- P5.JS INTERACTION FUNCTIONS ---
-
-        // Runs when the mouse is pressed
-        function mousePressed() {
-            // Leave this blank for now, can new interactions.
-            // This guard prevents clicks on the UI from doing anything
-            if (mouseY < 150) return; 
-        }
-
-        function mouseDragged() {
-            // 1. Prevent panning if touching the UI area
-            if (mouseY < 150) return;
-
-            // 2. Shift the origin by how much the mouse moved
-            // (movedX and movedY are built-in p5.js variables)
-            originX += movedX;
-            originY += movedY;
-
-            // 3. Clamp immediately so you can't drag the edge of the world into view
-            clampOrigin();
-        }
-
-
-        function mouseWheel(event) {
-            event.preventDefault();
-            if (mouseY < 150) return;
-
-            // 1. Calculate Usable Canvas Area
-            const effectiveHeight = height; 
-            const effectiveWidth = width;   
-
-            // 2. Calculate the fresh minimum scale needed to fill the window
-            const minScaleX = effectiveWidth / worldWidth;
-            const minScaleY = effectiveHeight / worldHeight;
-            
-            // Use the local minScale variable for immediate accuracy
-            // We add a tiny multiplier (1.001) to prevent 1px floating-point gaps
-            const localMinScale = Math.max(minScaleX, minScaleY) * 1.001; 
-
-            let s = event.deltaY > 0 ? 0.95 : 1.05;
-            let newScale = currentScale * s;
-            
-            // 3. Constrain using the LOCAL variable, not the global minZoom
-            newScale = constrain(newScale, localMinScale, 5); 
-
-            if (newScale === currentScale) return;
-
-            let worldX = (mouseX - originX) / currentScale;
-            let worldY = (mouseY - originY) / currentScale;
-
-            currentScale = newScale;
-
-            originX = mouseX - (worldX * currentScale);
-            originY = mouseY - (worldY * currentScale);
-
-            clampOrigin();
-        }
-
-        // Runs when the browser window is resized
-        function windowResized() {
-            resizeCanvas(windowWidth, windowHeight);
-            
-            // Recalculate minZoom based on new window size
-            let minScaleX = windowWidth / worldWidth;
-            let minScaleY = windowHeight / worldHeight;
-            minZoom = max(minScaleX, minScaleY);
-
-            // If the new window requires a larger zoom to fill it,
-            // force currentScale to match immediately.
-            if (currentScale < minZoom) {
-                currentScale = minZoom;
-            }
-
-            let canvasRect = canvas.elt.getBoundingClientRect();
-            canvasOffsetX = canvasRect.left;
-            canvasOffsetY = canvasRect.top;
-            
-            clampOrigin();
-        }
-
-        
-        // Clamp the originX and originY to prevent showing blank space
-        function clampOrigin() {
-            // 1. Calculate the scaled dimensions of the world
-            let scaledWorldW = worldWidth * currentScale;
-            let scaledWorldH = worldHeight * currentScale;
-            
-            // 2. Clamp Origin X
-            if (scaledWorldW <= width + 1) {
-                // If scaled world is smaller or equal to canvas width, force it to be centered.
-                originX = width / 2;
-            } else {
-                // If zoomed in, constrain panning.
-                let scaledHalfWorldW = scaledWorldW / 2;
-                let minX = width - scaledHalfWorldW; // Right edge of world touches right edge of screen
-                let maxX = scaledHalfWorldW;          // Left edge of world touches left edge of screen
-                
-                originX = constrain(originX, minX, maxX);
-            }
-            
-            // 3. Clamp Origin Y
-            if (scaledWorldH <= height + 1) {
-                // If scaled world is smaller or equal to canvas height, force it to be centered.
-                originY = height / 2;
-            } else {
-                // If zoomed in, constrain panning.
-                let scaledHalfWorldH = scaledWorldH / 2;
-                let minY = height - scaledHalfWorldH;
-                let maxY = scaledHalfWorldH;
-
-                originY = constrain(originY, minY, maxY);
-            }
-        }
-
-        // --- CHARACTER CLASS ---
-        // A blueprint for making characters
-        class Character {
+        /**
+         * BRAIN: Handles the "Thinking" logic. 
+         * Currently random, ready for LLM integration.
+         */
+        class Brain {
             constructor() {
-                // Position and Movement
-                this.x = random(-worldWidth / 2, worldWidth / 2); // Start in the world
-                this.y = random(0, worldHeight / 2); // Start in "bottom half" of world
-                this.vx = random(-5, 5); // Velocity x
-                this.vy = random(-3, 3); // Velocity y (slower vertical)
-                
-                
-
-
-                // Generative Look
-                this.img = spriteImg; 
-
-                // CHANGE THESE NUMBERS TO MATCH PNG:
-                this.frameWidth = 64;   // How wide is ONE character in pixels?
-                this.frameHeight = 66;  // How tall is ONE character?
-                this.totalFrames = 9;   // How many walking frames in the sheet?
-                
-                this.currentFrame = 0;  // Tracks which frame we are on (0, 1, 2...)
-                this.animSpeed = 0.4;  // How fast the legs move (0.1 to 0.3 is good)
-                this.animTimer = 0;     // Internal counter for timing
-
-
-                this.size = this.frameHeight * random(2.0, 2.4);
-
-                // We can still use a random color for tinting!
-                this.tintColor = color(random(150, 255), random(150, 255), random(150, 255));
-                this.tintColor.setAlpha(255); // Make sure it's not transparent
-
-
-                // Personality and Opinion
-                this.personality = random(Object.keys(opinionDatabase));
-                this.currentOpinion = "..."; // Default
-                this.showOpinion = false; // Bubble is hidden by default
+                this.responses = [
+                    "I love this!", "I'm hungry.", "What is that?", "Yes.", "No way!",
+                    "Maybe later.", "The sky is dark.", "Where am I?", "Hello!", "Running late!",
+                    "Did you hear that?", "Nice shoes.", "I want pizza.", "Hmm...", "Interesting.",
+                    "Who are you?", "Code is poetry.", "Walking is fun.", "Don't touch me.", "I'm tired."
+                ];
             }
 
-            // Method to get a new opinion
-            generateNewOpinion() {
-                let options = opinionDatabase[this.personality];
-                this.currentOpinion = random(options);
+            // Future: Make this async to call an API
+            thinkOfAnswer(question) {
+                const index = Math.floor(Math.random() * this.responses.length);
+                return this.responses[index];
+            }
+        }
+
+        /**
+         * CHARACTER: Logic for a single entity.
+         */
+        class Character {
+            constructor(id, x, y, spriteImage) {
+                this.id = id;
+                this.x = x;
+                this.y = y;
+                
+                // Velocity
+                this.vx = (Math.random() - 0.5) * SPEED;
+                this.vy = (Math.random() - 0.5) * SPEED;
+                
+                // Visuals
+                this.image = spriteImage;
+                this.brain = new Brain();
+                
+                // Animation State
+                this.frameIndex = 0;
+                this.row = 2; // 0:Up, 1:Left, 2:Down, 3:Right
+                this.tickCount = 0;
+                
+                // Interaction State
+                this.state = 'WANDERING'; // WANDERING, PREPARING, TALKING
+                this.speechText = "";
+                this.speechTimer = 0;
+                this.speechOpacity = 0;
             }
 
-            // Method to update position
-            update() {
-                // Apply velocity
+            update(canvasWidth, canvasHeight, allCharacters) {
+                // Handle Behavior States
+                if (this.state === 'WANDERING') {
+                    this.move(canvasWidth, canvasHeight);
+                    this.handleCollisions(allCharacters);
+                    this.updateAnimation();
+                } else if (this.state === 'PREPARING') {
+                    this.updateAnimation(); // Idle animation
+                } else if (this.state === 'TALKING') {
+                    // Count down speech visibility
+                    if (Date.now() > this.speechTimer) {
+                        this.state = 'WANDERING';
+                        this.pickNewRandomDirection();
+                    }
+                }
+            }
+
+            move(width, height) {
                 this.x += this.vx;
                 this.y += this.vy;
 
-                // Add random jitter to movement
-                this.vx += random(-0.1, 0.1);
-                this.vy += random(-0.05, 0.05);
+                // Boundary Bounce
+                if (this.x < HITBOX_RADIUS) { this.x = HITBOX_RADIUS; this.vx *= -1; }
+                if (this.x > width - HITBOX_RADIUS) { this.x = width - HITBOX_RADIUS; this.vx *= -1; }
+                if (this.y < HITBOX_RADIUS) { this.y = HITBOX_RADIUS; this.vy *= -1; }
+                if (this.y > height - HITBOX_RADIUS) { this.y = height - HITBOX_RADIUS; this.vy *= -1; }
 
-                // Constrain/clamp speed
-                this.vx = constrain(this.vx, -10, 10);
-                this.vy = constrain(this.vy, -3.5, 3.5);
+                // Random direction change occasionally
+                if (Math.random() < 0.01) this.pickNewRandomDirection();
+            }
 
-                // Bounce off world edges (no longer screen edges)
-                if (this.x < -worldWidth / 2 || this.x > worldWidth / 2) {
-                    this.vx *= -1;
-                }
-                // Bounce off floor and "ceiling" of their area
-                if (this.y < 0 || this.y > worldHeight / 2) { // <-- CHANGED
-                    this.vy *= -1;
-                }
-                
-                // 1. Update the frame counter
-                this.animTimer += this.animSpeed;
-                    
-                // 2. If timer passes 1, move to next frame
-                if (this.animTimer > 1) {
-                    this.animTimer = 0;
-                    this.currentFrame++;
-                    // 3. Loop back to start if we reach the end
-                    if (this.currentFrame >= this.totalFrames) {
-                        this.currentFrame = 0;
+            pickNewRandomDirection() {
+                const angle = Math.random() * Math.PI * 2;
+                this.vx = Math.cos(angle) * SPEED;
+                this.vy = Math.sin(angle) * SPEED;
+            }
+
+            handleCollisions(others) {
+                for (let other of others) {
+                    if (other.id === this.id) continue;
+
+                    let dx = other.x - this.x;
+                    let dy = other.y - this.y;
+                    let distance = Math.sqrt(dx*dx + dy*dy);
+                    let minDistance = HITBOX_RADIUS * 2;
+
+                    if (distance < minDistance) {
+                        // Collision detected: Push apart
+                        let angle = Math.atan2(dy, dx);
+                        
+                        let targetX = this.x + Math.cos(angle) * minDistance;
+                        let targetY = this.y + Math.sin(angle) * minDistance;
+                        
+                        let ax = (targetX - other.x) * 0.05;
+                        let ay = (targetY - other.y) * 0.05;
+
+                        this.vx -= ax;
+                        this.vy -= ay;
+                        other.vx += ax;
+                        other.vy += ay;
                     }
                 }
             }
 
+            updateAnimation() {
+                // Determine Row based on Velocity
+                if (Math.abs(this.vx) > Math.abs(this.vy)) {
+                    this.row = this.vx > 0 ? 3 : 1; // Right : Left
+                } else {
+                    this.row = this.vy > 0 ? 2 : 0; // Down : Up
+                }
 
-            // Method to draw the character
-            display() {
-                push(); // 1. Save the current drawing state
+                // Cycle Frames
+                this.tickCount += ANIMATION_SPEED;
+                if (this.tickCount > 1) {
+                    this.tickCount = 0;
+                    this.frameIndex = (this.frameIndex + 1) % 9;
+                }
+            }
+
+            // Triggered by User
+            ask(question) {
+                const response = this.brain.thinkOfAnswer(question);
                 
-                // 2. Move to the character's position
-                translate(this.x, this.y);
+                // Staggered Delay: 0 to 2000ms
+                const delay = Math.random() * 2000;
+                
+                this.state = 'PREPARING';
+                // Stop moving
+                this.vx = 0;
+                this.vy = 0;
 
-                // 3. DEPTH SCALE: Calculate scale based on Y position (2.5D effect)
-                // Characters lower on screen (higher Y) are larger
-                let s = map(this.y, 0, worldHeight / 2, 0.6, 1.2);
-                scale(s);
+                setTimeout(() => {
+                    this.speechText = response;
+                    this.state = 'TALKING';
+                    this.speechTimer = Date.now() + 5000; // Show for 5 seconds
+                }, delay);
+            }
 
-                // 4. DIRECTION FLIP: Check velocity to see which way we are walking
-                // If vx is negative (moving left), flip the coordinate system horizontally
-                if (this.vx > 0) {
-                    scale(-1, 1); 
+            draw(ctx) {
+                // Calculate Perspective Scale
+                // Characters at top (y=0) are 70% size, at bottom (y=height) are 110% size
+                const perspectiveScale = 0.7 + (this.y / ctx.canvas.height) * 0.4;
+                
+                const currentW = CHAR_WIDTH * perspectiveScale;
+                const currentH = CHAR_HEIGHT * perspectiveScale;
+
+                // 1. Draw Shadow
+                ctx.fillStyle = "rgba(0,0,0,0.3)";
+                ctx.beginPath();
+                ctx.ellipse(this.x, this.y, 12 * perspectiveScale, 6 * perspectiveScale, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 2. Draw Sprite or Fallback
+                // Check if image is loaded AND has natural dimensions (meaning file exists)
+                if (this.image && this.image.complete && this.image.naturalWidth > 0) {
+                    // Source coordinates from sprite sheet (Assumes 64px frames in source)
+                    // We assume standard frame size 64x64 for calculation, adjust if your PNG is different
+                    const frameW = this.image.width / 9;
+                    const frameH = this.image.height / 4;
+                    
+                    const sx = this.frameIndex * frameW; 
+                    const sy = this.row * frameH; 
+
+                    // Destination (Scaled)
+                    const dx = this.x - (currentW / 2); 
+                    const dy = this.y - (currentH * 0.9); // Anchor near bottom of sprite
+                    
+                    ctx.drawImage(this.image, sx, sy, frameW, frameH, dx, dy, currentW, currentH);
+                } else {
+                    // Fallback Box (If image missing)
+                    ctx.fillStyle = "#4488ff";
+                    ctx.fillRect(this.x - (15 * perspectiveScale), this.y - (30 * perspectiveScale), 30 * perspectiveScale, 60 * perspectiveScale);
                 }
 
-                // 5. DRAW THE SPRITE ANIMATION
-                imageMode(CENTER);
-                tint(this.tintColor); // Apply the random color tint
-
-                // --- Calculate Animation Slices ---
-                // Source X: Which frame is it on? (Frame Number * Width of one frame)
-                let sx = this.currentFrame * this.frameWidth; 
-                let sy = 0; // Top of the image (assuming a single-row sprite sheet)
-
-                // Calculate the drawing dimensions to maintain aspect ratio
-                let drawHeight = this.size;
-                let drawWidth = (this.frameWidth * drawHeight) / this.frameHeight;
-
-                // Draw the specific slice of the sprite sheet
-                // image(img, destX, destY, destW, destH, sourceX, sourceY, sourceW, sourceH)
-                image(
-                    this.img,           // The sprite sheet image
-                    0, -drawHeight / 2, // Destination X, Y (Shifted up so y=0 is feet)
-                    drawWidth,          // Destination Width
-                    drawHeight,         // Destination Height
-                    sx, sy,             // Source X, Y (Where to slice from)
-                    this.frameWidth,    // Source Width (Width of one frame)
-                    this.frameHeight    // Source Height (Height of one frame)
-                );
-
-                noTint(); // Turn off tint so it doesn't affect other drawings
-
-                // 6. DRAW SPEECH BUBBLE (Must be last to appear on top)
-                if (this.showOpinion && areBubblesVisible) {
-                    
-                    // If the character is flipped (walking left), the text will be backwards.
-                    // We must flip the coordinate system BACK to normal just for the text.
-                    if (this.vx > 0) {
-                        scale(-1, 1); 
-                    }
-
-                    rectMode(CENTER);
-                    textAlign(CENTER, CENTER);
-                    
-                    let bubbleH = 25;
-                    let bubbleW = textWidth(this.currentOpinion) + 16;
-                    
-                    // Position the bubble above the head.
-                    // We use 1.1 to ensure it clears the top of the sprite.
-                    let bubbleY = -this.size * 1.1 - (bubbleH / 2); 
-                    
-                    // Draw the Triangle Pointer
-                    fill(255);
-                    stroke(0);
-                    strokeWeight(2);
-                    triangle(
-                        -7, bubbleY + bubbleH / 2 - 1, // Left corner
-                        7, bubbleY + bubbleH / 2 - 1, // Right corner
-                        0, -this.size * 0.95          // Tip (pointing to head)
-                    );
-                    
-                    // Draw the Bubble Rectangle
-                    fill(255); // White background
-                    stroke(0);
-                    strokeWeight(2);
-                    rect(0, bubbleY, bubbleW, bubbleH, 8); // Rounded corners
-                    
-                    // Draw the Text
-                    fill(0); // Black text
-                    noStroke();
-                    textSize(12);
-                    text(this.currentOpinion, 0, bubbleY + 1);
+                // 3. Draw Speech Bubble (if Talking)
+                if (this.state === 'TALKING') {
+                    this.drawSpeechBubble(ctx, currentH, perspectiveScale);
                 }
+            }
 
-                pop(); // Restore the drawing state for the next character
+            drawSpeechBubble(ctx, charHeight, scale) {
+                const text = this.speechText;
+                ctx.font = `${12 * scale + 4}px Arial`; // Scale font slightly
+                const textMetrics = ctx.measureText(text);
+                const padding = 10 * scale;
+                const bubbleWidth = textMetrics.width + (padding * 2);
+                const bubbleHeight = 20 * scale + 10;
+                
+                const bubbleX = this.x - bubbleWidth / 2;
+                // Position bubble above the scaled character
+                const bubbleY = this.y - charHeight - bubbleHeight - 5;
+
+                // Bubble background
+                ctx.fillStyle = "white";
+                ctx.strokeStyle = "#333";
+                ctx.lineWidth = 2;
+                
+                // Round Rect Bubble
+                ctx.beginPath();
+                ctx.roundRect(bubbleX, bubbleY, bubbleWidth, bubbleHeight, 10);
+                ctx.fill();
+                ctx.stroke();
+
+                // Triangle Pointer
+                ctx.beginPath();
+                ctx.moveTo(this.x, bubbleY + bubbleHeight);
+                ctx.lineTo(this.x - 5, bubbleY + bubbleHeight + 5);
+                ctx.lineTo(this.x + 5, bubbleY + bubbleHeight + 5);
+                ctx.fill();
+
+                // Text
+                ctx.fillStyle = "black";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(text, this.x, bubbleY + (bubbleHeight/2));
             }
         }
+
+        /**
+         * WORLD: Manages the game loop and global state.
+         */
+        class World {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.characters = [];
+                this.spriteImage = new Image();
+                
+                this.resize();
+                window.addEventListener('resize', () => this.resize());
+
+                // Load Assets
+                this.spriteImage.src = SPRITE_SRC;
+                // Simple log to help debugging
+                this.spriteImage.onload = () => console.log("Sprite loaded successfully");
+                this.spriteImage.onerror = () => console.log("Sprite failed to load - using fallback rectangles");
+
+                // Initialize Characters
+                this.initCharacters();
+
+                // Input Handling
+                document.getElementById('ask-btn').addEventListener('click', () => this.handleAsk());
+
+                // Start Loop
+                this.lastTime = 0;
+                this.animate = this.animate.bind(this);
+                requestAnimationFrame(this.animate);
+            }
+
+            resize() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+            }
+
+            initCharacters() {
+                for (let i = 0; i < NUM_CHARACTERS; i++) {
+                    const x = Math.random() * this.canvas.width;
+                    const y = Math.random() * this.canvas.height;
+                    this.characters.push(new Character(i, x, y, this.spriteImage));
+                }
+            }
+
+            handleAsk() {
+                const input = document.getElementById('question-input');
+                const question = input.value;
+                if (!question.trim()) return;
+
+                // Trigger thinking process for all characters
+                this.characters.forEach(char => char.ask(question));
+                
+                // Optional: Clear input
+                // input.value = ''; 
+            }
+
+            animate(timestamp) {
+                const deltaTime = timestamp - this.lastTime;
+                this.lastTime = timestamp;
+
+                // Clear Canvas
+                this.ctx.fillStyle = "#333333";
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // Update Physics
+                this.characters.forEach(char => char.update(this.canvas.width, this.canvas.height, this.characters));
+
+                // Sort for Z-Index (2.5D Perspective)
+                // Characters with higher Y (lower on screen) drawn last (on top)
+                this.characters.sort((a, b) => a.y - b.y);
+
+                // Draw
+                this.characters.forEach(char => char.draw(this.ctx));
+
+                requestAnimationFrame(this.animate);
+            }
+        }
+
+        // Start the Game
+        window.onload = () => {
+            const world = new World();
+        };
+
     </script>
 </body>
 </html>
