@@ -1,0 +1,6 @@
+[submodule "Universal-LPC-Spritesheet-Character-Generator"]
+	path = Universal-LPC-Spritesheet-Character-Generator
+	url = git@github.com:LiberatedPixelCup/Universal-LPC-Spritesheet-Character-Generator.git
+[submodule "lpc-char-gen"]
+	path = lpc-char-gen
+	url = git@github.com:LiberatedPixelCup/Universal-LPC-Spritesheet-Character-Generator.git
