@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini World Simulation - Zoom & Pan</title>
+    <style>
+        /* RESET & BASIC STYLING */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #1a1a1a;
+            overflow: hidden;
+            /* Prevent scrollbars */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* UI OVERLAY */
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 25px;
+            border-radius: 30px;
+            display: flex;
+            gap: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            width: 90%;
+            max-width: 600px;
+            pointer-events: auto;
+            /* Ensure UI is clickable */
+        }
+
+        #question-input {
+            flex-grow: 1;
+            padding: 10px 15px;
+            border: 2px solid #ddd;
+            border-radius: 20px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        #question-input:focus {
+            border-color: #6a11cb;
+        }
+
+        #ask-btn {
+            padding: 10px 25px;
+            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+            color: white;
+            border: none;
+            border-radius: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+        }
+
+        #ask-btn:hover {
+            opacity: 0.9;
+        }
+
+        #ask-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* INSTRUCTIONS */
+        #instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.5);
+            pointer-events: none;
+            user-select: none;
+            font-size: 14px;
+        }
+
+        /* CANVAS */
+        canvas {
+            display: block;
+            background-color: #333333;
+            cursor: grab;
+        }
+
+        canvas:active {
+            cursor: grabbing;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- UI CONTAINER -->
+    <div id="ui-layer">
+        <input type="text" id="question-input" placeholder="Ask the villagers something...">
+        <button id="ask-btn">Ask</button>
+    </div>
+
+    <div id="instructions">
+        Mouse Wheel to Zoom • Click & Drag to Pan
+    </div>
+
+    <!-- GAME CANVAS -->
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // ==========================================
+        // CONFIGURATION & ASSETS
+        // ==========================================
+
+        // Character directories base path
+        const CHAR_BASE_PATH = './char_x1000/';
+
+        // WORLD SETTINGS (Landscape)
+        const WORLD_WIDTH = 3000;
+        const WORLD_HEIGHT = 1500;
+        const NUM_CHARACTERS = 100;
+
+        // VISUAL SETTINGS
+        const CHAR_WIDTH = 64;
+        const CHAR_HEIGHT = 64;
+        const HITBOX_RADIUS = 10;
+        const SPEED = 0.5;
+        const ANIMATION_SPEED = 0.15;
+
+        // ==========================================
+        // CLASSES
+        // ==========================================
+
+        /**
+         * BRAIN: Handles the "Thinking" logic. 
+         */
+        class Brain {
+            constructor() {
+                this.responses = [
+                    "I love this!", "I'm hungry.", "What is that?", "Yes.", "No way!",
+                    "Maybe later.", "The sky is dark.", "Where am I?", "Hello!", "Running late!",
+                    "Did you hear that?", "Nice shoes.", "I want pizza.", "Hmm...", "Interesting.",
+                    "Who are you?", "Code is poetry.", "Walking is fun.", "Don't touch me.", "I'm tired."
+                ];
+            }
+
+            // Future: Make this async to call an API
+            thinkOfAnswer(question) {
+                const index = Math.floor(Math.random() * this.responses.length);
+                return this.responses[index];
+            }
+        }
+
+        /**
+         * CHARACTER: Logic for a single entity.
+         */
+        class Character {
+            constructor(id, x, y, spritePath) {
+                this.id = id;
+                this.x = x;
+                this.y = y;
+
+                // Velocity
+                this.vx = (Math.random() - 0.5) * SPEED;
+                this.vy = (Math.random() - 0.5) * SPEED;
+
+                // Visuals
+                this.image = new Image();
+                this.image.src = spritePath;
+                this.brain = new Brain();
+
+                // Animation State
+                this.frameIndex = 0;
+                this.row = 2;
+                this.tickCount = 0;
+
+                // Interaction State
+                this.state = 'WANDERING'; // WANDERING, TALKING
+                this.speechText = "";
+                this.speechTimer = 0;
+
+                // Store timeout ID so we can cancel if needed
+                this.pendingSpeechTimeout = null;
+            }
+
+            update(allCharacters) {
+                // MOVEMENT LOGIC: Always run, even when talking
+                this.move();
+                this.handleCollisions(allCharacters);
+                this.updateAnimation();
+
+                // SPEECH LOGIC: Check if speech time is up
+                if (this.state === 'TALKING') {
+                    if (Date.now() > this.speechTimer) {
+                        this.state = 'WANDERING';
+                        this.speechText = "";
+                    }
+                }
+            }
+
+            move() {
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Boundary Bounce (Against WORLD size, not Canvas size)
+                if (this.x < HITBOX_RADIUS) { this.x = HITBOX_RADIUS; this.vx *= -1; }
+                if (this.x > WORLD_WIDTH - HITBOX_RADIUS) { this.x = WORLD_WIDTH - HITBOX_RADIUS; this.vx *= -1; }
+                if (this.y < HITBOX_RADIUS) { this.y = HITBOX_RADIUS; this.vy *= -1; }
+                if (this.y > WORLD_HEIGHT - HITBOX_RADIUS) { this.y = WORLD_HEIGHT - HITBOX_RADIUS; this.vy *= -1; }
+
+                // Random direction change occasionally
+                if (Math.random() < 0.01) this.pickNewRandomDirection();
+            }
+
+            pickNewRandomDirection() {
+                const angle = Math.random() * Math.PI * 2;
+                this.vx = Math.cos(angle) * SPEED;
+                this.vy = Math.sin(angle) * SPEED;
+            }
+
+            handleCollisions(others) {
+                for (let other of others) {
+                    if (other.id === this.id) continue;
+
+                    let dx = other.x - this.x;
+                    let dy = other.y - this.y;
+                    let distance = Math.sqrt(dx * dx + dy * dy);
+                    let minDistance = HITBOX_RADIUS * 2;
+
+                    if (distance < minDistance) {
+                        // Collision detected: Push apart
+                        let angle = Math.atan2(dy, dx);
+
+                        let targetX = this.x + Math.cos(angle) * minDistance;
+                        let targetY = this.y + Math.sin(angle) * minDistance;
+
+                        let ax = (targetX - other.x) * 0.05;
+                        let ay = (targetY - other.y) * 0.05;
+
+                        this.vx -= ax;
+                        this.vy -= ay;
+                        other.vx += ax;
+                        other.vy += ay;
+                    }
+                }
+            }
+
+            updateAnimation() {
+                if (Math.abs(this.vx) > Math.abs(this.vy)) {
+                    this.row = this.vx > 0 ? 3 : 1; // Right : Left
+                } else {
+                    this.row = this.vy > 0 ? 2 : 0; // Down : Up
+                }
+
+                this.tickCount += ANIMATION_SPEED;
+                if (this.tickCount > 1) {
+                    this.tickCount = 0;
+                    this.frameIndex = (this.frameIndex + 1) % 9;
+                }
+            }
+
+            // Triggered by User
+            ask(question) {
+                const response = this.brain.thinkOfAnswer(question);
+
+                // Clear any pending speech from previous clicks
+                if (this.pendingSpeechTimeout) clearTimeout(this.pendingSpeechTimeout);
+
+                // Staggered Delay: 0 to 4000ms (Wider spread)
+                const delay = Math.random() * 4000;
+
+                this.pendingSpeechTimeout = setTimeout(() => {
+                    this.startTalking(response);
+                }, delay);
+            }
+
+            startTalking(response) {
+                this.state = 'TALKING';
+                this.speechText = response;
+                this.speechTimer = Date.now() + 5000; // Show for 5 seconds
+
+                // MOVEMENT CONTINUES: No longer setting vx/vy to 0
+            }
+
+            draw(ctx) {
+                // Calculate Perspective Scale based on WORLD height
+                // Top of world = 0.6 scale, Bottom of world = 1.2 scale
+                const perspectiveScale = 0.6 + (this.y / WORLD_HEIGHT) * 0.6;
+
+                const currentW = CHAR_WIDTH * perspectiveScale;
+                const currentH = CHAR_HEIGHT * perspectiveScale;
+
+                // 1. Draw Shadow
+                ctx.fillStyle = "rgba(0,0,0,0.3)";
+                ctx.beginPath();
+                ctx.ellipse(this.x, this.y, 12 * perspectiveScale, 6 * perspectiveScale, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 2. Draw Sprite or Fallback
+                if (this.image && this.image.complete && this.image.naturalWidth > 0) {
+                    const frameW = this.image.width / 9;
+                    const frameH = this.image.height / 4;
+
+                    const sx = this.frameIndex * frameW;
+                    const sy = this.row * frameH;
+
+                    const dx = this.x - (currentW / 2);
+                    const dy = this.y - (currentH * 0.9);
+
+                    ctx.drawImage(this.image, sx, sy, frameW, frameH, dx, dy, currentW, currentH);
+                } else {
+                    // Fallback Box
+                    ctx.fillStyle = "#4488ff";
+                    ctx.fillRect(this.x - (15 * perspectiveScale), this.y - (30 * perspectiveScale), 30 * perspectiveScale, 60 * perspectiveScale);
+                }
+
+                // 3. Draw Speech Bubble
+                if (this.state === 'TALKING') {
+                    this.drawSpeechBubble(ctx, currentH, perspectiveScale);
+                }
+            }
+
+            drawSpeechBubble(ctx, charHeight, scale) {
+                const text = this.speechText;
+                // Scale font but keep it readable (min 12px)
+                const fontSize = Math.max(12, 12 * scale + 4);
+                ctx.font = `${fontSize}px Arial`;
+                const textMetrics = ctx.measureText(text);
+                const padding = 10 * scale;
+                const bubbleWidth = textMetrics.width + (padding * 2);
+                const bubbleHeight = fontSize * 1.5 + 10;
+
+                const bubbleX = this.x - bubbleWidth / 2;
+                const bubbleY = this.y - charHeight - bubbleHeight - 5;
+
+                // Bubble background
+                ctx.fillStyle = "white";
+                ctx.strokeStyle = "#333";
+                ctx.lineWidth = 2;
+
+                ctx.beginPath();
+                ctx.roundRect(bubbleX, bubbleY, bubbleWidth, bubbleHeight, 10);
+                ctx.fill();
+                ctx.stroke();
+
+                // Pointer
+                ctx.beginPath();
+                ctx.moveTo(this.x, bubbleY + bubbleHeight);
+                ctx.lineTo(this.x - 5, bubbleY + bubbleHeight + 5);
+                ctx.lineTo(this.x + 5, bubbleY + bubbleHeight + 5);
+                ctx.fill();
+
+                // Text
+                ctx.fillStyle = "black";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText(text, this.x, bubbleY + (bubbleHeight / 2));
+            }
+        }
+
+        /**
+         * WORLD: Manages the game loop, global state, and Camera.
+         */
+        class World {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.characters = [];
+
+                // Camera State
+                this.camera = {
+                    x: WORLD_WIDTH / 2,
+                    y: WORLD_HEIGHT / 2,
+                    zoom: 1,
+                    minZoom: 0.5, // Will be recalculated on resize
+                    maxZoom: 3,
+                    isDragging: false,
+                    dragStartX: 0,
+                    dragStartY: 0
+                };
+
+                this.resize(); // This will now set the correct minZoom immediately
+                window.addEventListener('resize', () => this.resize());
+                this.setupInputs();
+
+                // Initialize Characters
+                this.initCharacters();
+
+                // Input Handling
+                document.getElementById('ask-btn').addEventListener('click', () => this.handleAsk());
+
+                // Start Loop
+                this.lastTime = 0;
+                this.animate = this.animate.bind(this);
+                requestAnimationFrame(this.animate);
+            }
+
+            setupInputs() {
+                // Mouse Wheel Zoom
+                this.canvas.addEventListener('wheel', (e) => {
+                    e.preventDefault();
+                    const zoomSensitivity = 0.001;
+
+                    // Calculate new zoom
+                    let newZoom = this.camera.zoom - (e.deltaY * zoomSensitivity * this.camera.zoom);
+
+                    // Clamp to min/max
+                    newZoom = Math.max(newZoom, this.camera.minZoom);
+                    newZoom = Math.min(newZoom, this.camera.maxZoom);
+
+                    this.camera.zoom = newZoom;
+
+                    // Re-clamp position to ensure we didn't zoom out past edges
+                    this.clampCamera();
+
+                }, { passive: false });
+
+                // Mouse Drag Pan
+                this.canvas.addEventListener('mousedown', (e) => {
+                    this.camera.isDragging = true;
+                    this.camera.dragStartX = e.clientX;
+                    this.camera.dragStartY = e.clientY;
+                });
+
+                window.addEventListener('mousemove', (e) => {
+                    if (this.camera.isDragging) {
+                        const dx = e.clientX - this.camera.dragStartX;
+                        const dy = e.clientY - this.camera.dragStartY;
+
+                        // Move camera opposite to drag direction
+                        this.camera.x -= dx / this.camera.zoom;
+                        this.camera.y -= dy / this.camera.zoom;
+
+                        this.camera.dragStartX = e.clientX;
+                        this.camera.dragStartY = e.clientY;
+
+                        // Enforce boundaries
+                        this.clampCamera();
+                    }
+                });
+
+                window.addEventListener('mouseup', () => {
+                    this.camera.isDragging = false;
+                });
+            }
+
+            // Helper to keep camera inside world bounds
+            clampCamera() {
+                // Calculate visible width/height in world units
+                const visibleWidth = this.canvas.width / this.camera.zoom;
+                const visibleHeight = this.canvas.height / this.camera.zoom;
+
+                // Calculate min and max x/y coordinates for the camera center
+                // We want: camera.x - visibleWidth/2 >= 0  => camera.x >= visibleWidth/2
+                // We want: camera.x + visibleWidth/2 <= WORLD_WIDTH => camera.x <= WORLD_WIDTH - visibleWidth/2
+
+                const minX = visibleWidth / 2;
+                const maxX = WORLD_WIDTH - visibleWidth / 2;
+                const minY = visibleHeight / 2;
+                const maxY = WORLD_HEIGHT - visibleHeight / 2;
+
+                // If the world is smaller than the viewport (shouldn't happen due to minZoom, but good for safety), 
+                // center it.
+                if (minX > maxX) this.camera.x = WORLD_WIDTH / 2;
+                else this.camera.x = Math.max(minX, Math.min(this.camera.x, maxX));
+
+                if (minY > maxY) this.camera.y = WORLD_HEIGHT / 2;
+                else this.camera.y = Math.max(minY, Math.min(this.camera.y, maxY));
+            }
+
+            resize() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+
+                // Calculate Minimum Zoom to ensure World covers Screen
+                // We want the world to fill the screen, so we can't zoom out to see the void.
+                const minZoomX = this.canvas.width / WORLD_WIDTH;
+                const minZoomY = this.canvas.height / WORLD_HEIGHT;
+
+                // We pick the larger of the two ratios. 
+                // This ensures that the 'short' side of the world always fills the screen.
+                this.camera.minZoom = Math.max(minZoomX, minZoomY);
+
+                // Adjust current zoom if it violates new min
+                if (this.camera.zoom < this.camera.minZoom) {
+                    this.camera.zoom = this.camera.minZoom;
+                }
+
+                this.clampCamera();
+            }
+
+            initCharacters() {
+                for (let i = 1; i <= NUM_CHARACTERS; i++) {
+                    const x = Math.random() * WORLD_WIDTH;
+                    const y = Math.random() * WORLD_HEIGHT;
+                    const charNumber = String(i).padStart(4, '0');
+                    const spritePath = `${CHAR_BASE_PATH}character_${charNumber}/walk.png`;
+                    this.characters.push(new Character(i, x, y, spritePath));
+                }
+            }
+
+            handleAsk() {
+                const input = document.getElementById('question-input');
+                const question = input.value;
+                if (!question.trim()) return;
+
+                // Trigger thinking process for all characters
+                this.characters.forEach(char => char.ask(question));
+            }
+
+            animate(timestamp) {
+                const deltaTime = timestamp - this.lastTime;
+                this.lastTime = timestamp;
+
+                // 1. Update Logic (Physics)
+                // Passing empty array to 'others' for now to simplify this step 
+                // or pass specific nearby chunks for optimization, but for 100 chars, O(N^2) is fine.
+                this.characters.forEach(char => char.update(this.characters));
+
+                // 2. Clear Screen
+                this.ctx.fillStyle = "#333333";
+                this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+                // 3. Apply Camera Transform
+                this.ctx.save();
+
+                // Translate to center of screen
+                this.ctx.translate(this.canvas.width / 2, this.canvas.height / 2);
+                // Scale
+                this.ctx.scale(this.camera.zoom, this.camera.zoom);
+                // Translate to camera position (negative because moving camera right moves world left)
+                this.ctx.translate(-this.camera.x, -this.camera.y);
+
+                // 4. Draw World Borders (Visual Aid)
+                this.ctx.strokeStyle = "#444";
+                this.ctx.lineWidth = 5;
+                this.ctx.strokeRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+
+                // Grid lines for perspective reference
+                this.ctx.strokeStyle = "#3a3a3a";
+                this.ctx.lineWidth = 1;
+                for (let i = 0; i <= WORLD_WIDTH; i += 100) {
+                    this.ctx.beginPath(); this.ctx.moveTo(i, 0); this.ctx.lineTo(i, WORLD_HEIGHT); this.ctx.stroke();
+                    this.ctx.beginPath(); this.ctx.moveTo(0, i); this.ctx.lineTo(WORLD_WIDTH, i); this.ctx.stroke();
+                }
+
+                // 5. Sort & Draw Characters
+                // Sort logic remains simple based on Y
+                this.characters.sort((a, b) => a.y - b.y);
+
+                // Optimization: Only draw characters inside the viewport?
+                // For 100 characters, it's okay to just draw all.
+                this.characters.forEach(char => char.draw(this.ctx));
+
+                // 6. Restore Context for next frame
+                this.ctx.restore();
+
+                requestAnimationFrame(this.animate);
+            }
+        }
+
+        // Start the Game
+        window.onload = () => {
+            const world = new World();
+        };
+
+    </script>
+</body>
+
+</html>
