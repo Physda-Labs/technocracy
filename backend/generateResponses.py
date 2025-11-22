@@ -149,6 +149,51 @@ def get_global_question():
     question = redis_client.get('global:question')
     return question if question else ''
 
+def save_conversation(character_ids, conversation_log):
+    """
+    Save a conversation to Redis.
+    
+    Args:
+        character_ids (list): List of character IDs involved
+        conversation_log (str): The full conversation text
+    
+    Returns:
+        str: The conversation ID
+    """
+    # Generate a unique conversation ID
+    conv_id = redis_client.incr('conversation:counter')
+    key = f"conversation:{conv_id}"
+    
+    redis_client.hset(key, mapping={
+        'id': conv_id,
+        'character_ids': json.dumps(character_ids),
+        'conversation_log': conversation_log
+    })
+    
+    return str(conv_id)
+
+def get_conversation(conv_id):
+    """
+    Retrieve a conversation from Redis.
+    
+    Args:
+        conv_id (str or int): Conversation ID
+    
+    Returns:
+        dict: Conversation data with id, character_ids, conversation_log
+    """
+    key = f"conversation:{conv_id}"
+    data = redis_client.hgetall(key)
+    
+    if not data:
+        return None
+    
+    return {
+        'id': int(data['id']),
+        'character_ids': json.loads(data['character_ids']),
+        'conversation_log': data['conversation_log']
+    }
+
 def get_all_characters_data():
     """
     Get all character data from Redis.
@@ -193,7 +238,7 @@ def cleanAnswers():
         open(full_path, 'w').close()
         open(short_path, 'w').close()
 
-def query_gpt(prompt, model = "gpt-3.5-turbo"):
+def query_gpt(prompt, model = "gpt-4o-mini"):
     response = client.chat.completions.create(model=model,
     messages=[
         {"role": "system", "content": prompt}
@@ -249,7 +294,7 @@ def createNamePersona_x100():
             try:
                 # Make API call
                 response = client.chat.completions.create(
-                    model="gpt-4o-2024-08-06",
+                    model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": prompt}
                     ],
@@ -316,7 +361,7 @@ def considerQuestion(question, char_id):
     
     # Use structured output for the response
     response = client.chat.completions.create(
-        model="gpt-4o-2024-08-06",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": prompt_2}
         ],
@@ -389,6 +434,79 @@ def process_character(char_id, question):
         'response': response_text,
         'answer': answer_bool,
         'passion': passion_score
+    }
+
+def character_conversation_response(char_id, conversation_so_far):
+    """
+    Get a character's response to the ongoing conversation.
+    
+    Args:
+        char_id (int): Character ID
+        conversation_so_far (str): The conversation that has happened so far
+    
+    Returns:
+        str: The character's response to add to the conversation
+    """
+    char_info = get_character_info(char_id)
+    question = get_global_question()
+    
+    prompt = f"""{char_info['persona']}
+
+The question being discussed is: {question}
+
+Conversation so far:
+{conversation_so_far}
+
+As {char_info['name']}, respond to this conversation with your thoughts. Keep your response conversational and under 100 words."""
+    
+    response = query_gpt(prompt)
+    return response
+
+def check_mind_changed(char_id, conversation_log):
+    """
+    Ask a character if their mind has changed after the conversation.
+    
+    Args:
+        char_id (int): Character ID
+        conversation_log (str): The full conversation
+    
+    Returns:
+        dict: {'answer': bool, 'passion': float}
+    """
+    char_info = get_character_info(char_id)
+    question = get_global_question()
+    
+    prompt = f"""{char_info['persona']}
+
+Original question: {question}
+
+After this conversation:
+{conversation_log}
+
+Has your answer changed? Respond with your final position on the question."""
+    
+    # Use structured output for the response
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": prompt}
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "character_question_response",
+                "strict": True,
+                "schema": CharacterQuestionResponse.model_json_schema()
+            }
+        },
+        max_tokens=800,
+        temperature=0.8
+    )
+    
+    result = json.loads(response.choices[0].message.content)
+    return {
+        'answer': result['answer'],
+        'passion': result['passion']
     }
 
 def promptCharacters(question, num):
@@ -514,14 +632,64 @@ def handle_conversation():
             if char_data:
                 characters_data.append(char_data)
         
-        # Process will be added here
-
-
+        if not characters_data:
+            return jsonify({'error': 'No valid characters found'}), 404
+        
+        # Sort characters by passion (highest first)
+        characters_data.sort(key=lambda x: x['passion'], reverse=True)
+        
+        # Initialize conversation log
+        conversation = ""
+        question = get_global_question()
+        
+        # Each character presents their thoughts in order of passion
+        for char_data in characters_data:
+            char_id = char_data['id']
+            char_info = get_character_info(char_id)
+            
+            # Get character's response to the conversation so far
+            if conversation == "":
+                # First character starts the conversation with their original response
+                response = f"{char_info['name']}: {char_data['chat']}"
+            else:
+                # Subsequent characters respond to the conversation
+                response_text = character_conversation_response(char_id, conversation)
+                response = f"{char_info['name']}: {response_text}"
+            
+            # Add to conversation log
+            conversation += response + "\n\n"
+        
+        # Now check if any character's mind has changed
+        updated_characters = []
+        for char_data in characters_data:
+            char_id = char_data['id']
+            
+            # Check if mind changed
+            result = check_mind_changed(char_id, conversation)
+            
+            # Update Redis with new answer and passion
+            update_character_answer(char_id, result['answer'])
+            update_character_passion(char_id, result['passion'])
+            
+            # Append conversation to chat field
+            current_chat = char_data['chat']
+            new_chat = current_chat + "\n\n--- Group Conversation ---\n" + conversation
+            update_character_chat(char_id, new_chat)
+            
+            # Get updated character data
+            updated_char = get_character_data(char_id)
+            updated_characters.append(updated_char)
+        
+        # Save the conversation to Redis
+        conv_id = save_conversation(character_ids, conversation)
+        
         return jsonify({
             'success': True,
-            'question': get_global_question(),
+            'question': question,
+            'conversation_id': conv_id,
+            'conversation_log': conversation,
             'character_ids': character_ids,
-            'characters_data': characters_data
+            'characters_data': updated_characters
         }), 200
         
     except Exception as e:
