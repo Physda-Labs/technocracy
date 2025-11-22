@@ -1,14 +1,14 @@
 # Technocracy
 
-An interactive AI-powered character simulation platform featuring 1,000 unique characters that can engage in conversations, answer questions, and interact within a dynamic 2D world.
+An interactive AI-powered character simulation platform featuring 100 unique characters that can engage in conversations, answer questions, and interact within a dynamic 2D world.
 
 ## 🌟 Overview
 
-Technocracy combines a Next.js frontend with a Flask backend to create an immersive experience where AI-powered characters have distinct personalities, opinions, and the ability to engage in meaningful conversations. Each character is powered by OpenAI's GPT models and maintains conversation history through Redis caching.
+Technocracy combines a Next.js frontend with a Flask backend to create an immersive experience where AI-powered characters have distinct personalities, opinions, and the ability to engage in meaningful conversations. Each character is powered by OpenAI's GPT models and maintains conversation history through Redis caching. You can interact with the characters with voice, using LiveKit and ElevenLabs.
 
 ### Key Features
 
-- **1,000 Unique Characters**: Each with custom sprites, personalities, and attributes
+- **100 Unique Characters**: Each with custom sprites, personalities, and attributes
 - **AI-Powered Conversations**: Characters can answer questions and engage in multi-turn conversations
 - **Interactive 2D World**: Real-time character simulation with smooth animations
 - **Passion Scoring**: Characters express varying levels of interest in topics
@@ -75,9 +75,6 @@ pip install -r requirements.txt
 # Set environment variables
 export OPENAI_API_KEY="your-openai-api-key"
 export REDIS_URL="redis://localhost:6379"
-
-# Start Redis (if running locally)
-redis-server
 
 # Run the Flask server
 python generateResponses.py
@@ -238,40 +235,6 @@ For detailed deployment instructions, see:
 - **[Backend README](backend/README.md)** - API documentation and local development
 - **[Quick Start Guide](backend/QUICK_START.md)** - Fast deployment instructions
 
-## 🔧 Development Scripts
-
-### Frontend
-
-```bash
-npm run dev                          # Start dev server on port 3003
-npm run build                        # Build for production
-npm run lint                         # Run Biome linter
-npm run format                       # Format code with Biome
-npm run download:characters          # Download all 1,000 characters
-npm run download:characters:resume   # Resume interrupted download
-npm run cleanup:characters           # Clean up character data
-```
-
-### Backend
-
-```bash
-python generateResponses.py          # Start Flask server
-python test.py                       # Run tests
-python add_character_fields.py       # Add new fields to character data
-python reformat.py                   # Reformat character data
-```
-
-## 🤝 Contributing
-
-This project was created for the OpenAI Hackathon. Contributions, issues, and feature requests are welcome!
-
-## 📄 License
-
-This project uses character data from [Physda-Labs/technocracy](https://github.com/Physda-Labs/technocracy). Please refer to their repository for licensing information regarding character assets.
-
-## 🙏 Acknowledgments
-
-- Character sprites and data from [Physda-Labs/technocracy](https://github.com/Physda-Labs/technocracy)
 - UI components from [shadcn/ui](https://ui.shadcn.com/)
 - Powered by OpenAI's GPT models
 
