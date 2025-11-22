@@ -22,6 +22,39 @@ redis_client = redis.Redis(
     decode_responses=True  # Automatically convert bytes to strings
 )
 
+def get_character_info(char_id):
+    """
+    Get character name and persona from all-characters.json
+    
+    Args:
+        char_id (str or int): Character ID (e.g., "1", "0001", or 1)
+    
+    Returns:
+        dict: {'name': str, 'persona': str} or None if not found
+    """
+    # Format the character ID with leading zeros
+    char_id_str = str(char_id)
+    while len(char_id_str) < 4:
+        char_id_str = "0" + char_id_str
+    
+    char_key = f"character_{char_id_str}"
+    
+    # Path to the JSON file (change this to your actual path)
+    json_path = Path(__file__).parent.parent / "frontend" / "public" / "characters" / "data" / "all-characters.json"
+    
+    # Load and extract data
+    with open(json_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    if char_key in data["characters"]:
+        character = data["characters"][char_key]
+        return {
+            'name': character.get('name', ''),
+            'persona': character.get('persona', '')
+        }
+    
+    return None
+
 def init_character_cache(char_id):
     """
     Initialize a character in Redis cache with default values.
@@ -218,28 +251,27 @@ def considerQuestion(question, char_id):
     char_id = str(char_id)
     while (len(char_id) < 4): char_id = "0" + char_id
 
+    # Extract character persona and name.
+
+    char_info = get_character_info(char_id)
+
     with (
-        open(f'char_x1000/character_{char_id}/description.txt', 'r') as desc_f,
         open('prompts/introduction.txt', 'r') as intro_f,
         open('prompts/pre.txt', 'r') as pre_f,
         open('prompts/post.txt', 'r') as post_f,
     ):
-        character_description = desc_f.read()
         introduction_prompt = intro_f.read()
         pre_prompt = pre_f.read()
         post_prompt = post_f.read()
 
-    response_1 = query_gpt(character_description + introduction_prompt)
-    prompt_2 = character_description + introduction_prompt + response_1 + pre_prompt + question + post_prompt
+    response_1 = query_gpt(char_info['persona'] + introduction_prompt)
+    prompt_2 = char_info['persona'] + introduction_prompt + response_1 + pre_prompt + question + post_prompt
     response_2 = query_gpt(prompt_2)
-
-    print(response_2)
 
     return response_2
 
 def getAnswer(prompt):
     short = prompt[-60:]
-    print(short)
     if "yes" in short or "Yes" in short:
         return True
     else:
