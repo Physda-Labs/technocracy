@@ -277,7 +277,7 @@ def process_character(char_id, question):
     """
     answer = considerQuestion(question, char_id)
     ans_yes = getAnswer(answer)
-    writeOut(answer, char_id)
+    # writeOut(answer, char_id)
     
     # Update Redis cache with the character's response
     update_character_chat(char_id, answer)
@@ -311,8 +311,6 @@ def promptCharacters(question, num):
             except Exception as exc:
                 print(f"Character {char_id} generated an exception: {exc}")
                 count_no += 1  # Count errors as "No" votes
-
-    print(f"\nFinal tally - Yes: {count_yes}, No: {count_no}")
     
     # Return results as a dictionary
     return {
@@ -339,29 +337,20 @@ def handle_question():
     """
     Expects JSON like:
     {
-        "question": "Should I buy these shoes?",
-        "num_characters": 100  # optional, defaults to 100
+        "question": "Should I buy these shoes?"
     }
     """
     try:
         # Get the data sent from the frontend
         data = request.json
         question = data.get('question')
-        num_characters = data.get('num_characters', 100)
 
         # Validate input
         if not question:
             return jsonify({'error': 'Question is required'}), 400
         
-        # Clear previous cache data
-        clear_all_characters()
-        
-        # Initialize cache for all characters
-        for i in range(1, num_characters + 1):
-            init_character_cache(i)
-        
-        # Call your existing function to get responses from characters
-        results = promptCharacters(question, num_characters)
+        # Call your existing function to get responses from characters (100 characters)
+        results = promptCharacters(question, 100)
         
         # Update cache with results - the promptCharacters function
         # should now also update the cache (see modified process_character)
@@ -483,6 +472,13 @@ if __name__ == '__main__':
         print("  Install: sudo apt install redis-server (Ubuntu) or brew install redis (Mac)")
         print("  Start: redis-server")
         exit(1)
+    
+    # Initialize all 100 characters in Redis at startup
+    print("\nInitializing 100 characters in Redis cache...")
+    clear_all_characters()  # Clear any old data first
+    for i in range(1, 101):
+        init_character_cache(i)
+    print(f"✓ Initialized {len(get_all_characters_data())} characters")
     
     print("\nStarting Flask server on http://localhost:5037")
     print("Available endpoints:")
