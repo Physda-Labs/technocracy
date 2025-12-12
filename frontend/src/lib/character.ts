@@ -10,6 +10,7 @@ import {
   Direction,
   CharacterState,
   getRandomResponse,
+  TrapCircle,
 } from './world';
 import { drawSprite, drawShadow, drawSpeechBubble } from './canvas-utils';
 
@@ -46,6 +47,16 @@ export class SimulationCharacter {
   savedVx: number = 0;
   savedVy: number = 0;
 
+  // Aura determines interaction radius (0-1, randomly assigned)
+  aura: number;
+
+  // Get interaction radius based on aura
+  get interactionRadius(): number {
+    const min = CHARACTER_CONFIG.INTERACTION_RADIUS_MIN;
+    const max = CHARACTER_CONFIG.INTERACTION_RADIUS_MAX;
+    return min + (this.aura * (max - min));
+  }
+
   constructor(characterData: CharacterData, x: number, y: number, vx: number, vy: number) {
     this.id = characterData.id.toString();
     this.data = characterData;
@@ -53,6 +64,9 @@ export class SimulationCharacter {
     this.y = y;
     this.vx = vx;
     this.vy = vy;
+
+    // Assign random aura (0-1)
+    this.aura = Math.random();
 
     // Load sprite image
     this.loadImage();
@@ -108,7 +122,7 @@ export class SimulationCharacter {
   /**
    * Update character position and state
    */
-  update(deltaTime: number = 1, allCharacters: SimulationCharacter[] = []): void {
+  update(deltaTime: number = 1, allCharacters: SimulationCharacter[] = [], trapCircles: TrapCircle[] = []): void {
     // Update speech timer (independent of movement state)
     if (this.speechTimer > 0) {
       this.speechTimer -= deltaTime * 16.67; // Approximate ms per frame at 60fps
@@ -122,7 +136,7 @@ export class SimulationCharacter {
     }
 
     // Move character
-    this.move();
+    this.move(trapCircles);
 
     // Handle collisions if other characters are provided
     if (allCharacters.length > 0) {
@@ -136,7 +150,7 @@ export class SimulationCharacter {
   /**
    * Move the character and handle world boundaries
    */
-  private move(): void {
+  private move(trapCircles: TrapCircle[] = []): void {
     // Don't move if sitting
     if (this.state === CharacterState.SITTING) {
       return;
@@ -161,6 +175,37 @@ export class SimulationCharacter {
       const angle = Math.random() * Math.PI * 2;
       this.vx = Math.cos(angle) * CHARACTER_CONFIG.SPEED;
       this.vy = Math.sin(angle) * CHARACTER_CONFIG.SPEED;
+    }
+
+    // Handle trap circle boundaries
+    for (const circle of trapCircles) {
+      const dx = this.x - circle.x;
+      const dy = this.y - circle.y;
+      const distFromCenter = Math.sqrt(dx * dx + dy * dy);
+      const prevDx = (this.x - this.vx) - circle.x;
+      const prevDy = (this.y - this.vy) - circle.y;
+      const prevDistFromCenter = Math.sqrt(prevDx * prevDx + prevDy * prevDy);
+
+      // Was inside, trying to exit
+      if (prevDistFromCenter < circle.radius && distFromCenter >= circle.radius) {
+        // Push back inside and bounce
+        const angle = Math.atan2(dy, dx);
+        this.x = circle.x + Math.cos(angle) * (circle.radius - 1);
+        this.y = circle.y + Math.sin(angle) * (circle.radius - 1);
+        // Reverse velocity (bounce)
+        this.vx *= -1;
+        this.vy *= -1;
+      }
+      // Was outside, trying to enter
+      else if (prevDistFromCenter > circle.radius && distFromCenter <= circle.radius) {
+        // Push back outside and bounce
+        const angle = Math.atan2(dy, dx);
+        this.x = circle.x + Math.cos(angle) * (circle.radius + 1);
+        this.y = circle.y + Math.sin(angle) * (circle.radius + 1);
+        // Reverse velocity (bounce)
+        this.vx *= -1;
+        this.vy *= -1;
+      }
     }
   }
 
@@ -287,12 +332,12 @@ export class SimulationCharacter {
     ctx.stroke();
     ctx.setLineDash([]); // Reset line dash
 
-    // Draw interaction radius (red dotted circle)
+    // Draw interaction radius (red dotted circle) - size based on aura
     ctx.strokeStyle = 'rgba(163, 45, 45, 0.5)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 3;
     ctx.setLineDash([5, 5]); // Dotted line pattern
     ctx.beginPath();
-    ctx.arc(this.x, this.y, CHARACTER_CONFIG.INTERACTION_RADIUS, 0, Math.PI * 2);
+    ctx.arc(this.x, this.y, this.interactionRadius, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]); // Reset line dash
 

@@ -8,11 +8,21 @@ export const WORLD_CONFIG = {
   NUM_CHARACTERS: 20,
 } as const;
 
+// Trap circle that acts as a boundary
+export interface TrapCircle {
+  id: string;
+  x: number;
+  y: number;
+  radius: number;
+}
+
 export const CHARACTER_CONFIG = {
   WIDTH: 64,
   HEIGHT: 64,
   HITBOX_RADIUS: 10,
-  INTERACTION_RADIUS: 50, // Radius for mouse hover detection
+  CLICKABLE_RADIUS: 40, // Fixed radius for click/hover detection
+  INTERACTION_RADIUS_MIN: 50, // Min visual radius (at aura 0)
+  INTERACTION_RADIUS_MAX: 200, // Max visual radius (at aura 1)
   SPEED: 0.5, // Increased from 0.5 for more visible movement
   ANIMATION_SPEED: 0.2, // Increased from 0.15 for smoother animation
   DIRECTION_CHANGE_CHANCE: 0.01, // 1% chance per frame

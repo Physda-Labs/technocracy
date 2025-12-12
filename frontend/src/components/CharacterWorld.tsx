@@ -11,7 +11,7 @@ import { useCharacterData } from '@/src/hooks/useCharacterData';
 import { useCamera } from '@/src/hooks/useCamera';
 import { useGameLoop } from '@/src/hooks/useGameLoop';
 import { SimulationCharacter } from '@/src/lib/character';
-import { getRandomPosition, getRandomVelocity } from '@/src/lib/world';
+import { getRandomPosition, getRandomVelocity, TrapCircle } from '@/src/lib/world';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 
 export function CharacterWorld() {
@@ -30,6 +30,24 @@ export function CharacterWorld() {
     handleMouseMove,
     handleMouseUp,
   } = useCamera(canvasSize.width, canvasSize.height);
+
+  // Trap circles state
+  const [trapCircles, setTrapCircles] = useState<TrapCircle[]>([]);
+
+  // Add a new trap circle
+  const addTrapCircle = useCallback((circle: TrapCircle) => {
+    setTrapCircles((prev) => [...prev, circle]);
+  }, []);
+
+  // Remove a trap circle by ID
+  const removeTrapCircle = useCallback((id: string) => {
+    setTrapCircles((prev) => prev.filter((c) => c.id !== id));
+  }, []);
+
+  // Clear all trap circles
+  const clearAllTrapCircles = useCallback(() => {
+    setTrapCircles([]);
+  }, []);
 
   // Initialize simulation characters
   const simulationCharacters = useMemo(() => {
@@ -67,9 +85,9 @@ export function CharacterWorld() {
   useGameLoop(
     useCallback(
       (deltaTime) => {
-        simulationCharacters.forEach((char) => char.update(deltaTime, simulationCharacters));
+        simulationCharacters.forEach((char) => char.update(deltaTime, simulationCharacters, trapCircles));
       },
-      [simulationCharacters]
+      [simulationCharacters, trapCircles]
     ),
     simulationCharacters.length > 0
   );
@@ -130,10 +148,13 @@ export function CharacterWorld() {
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             isDragging={isDragging}
+            trapCircles={trapCircles}
+            onAddTrapCircle={addTrapCircle}
+            onRemoveTrapCircle={removeTrapCircle}
           />
         </div>
       </SidebarInset>
-      <WorldControls onAsk={handleAsk} characters={characterData} />
+      <WorldControls onAsk={handleAsk} characters={characterData} onClearTrapCircles={clearAllTrapCircles} trapCircleCount={trapCircles.length} />
     </SidebarProvider>
   );
 }

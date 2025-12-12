@@ -7,7 +7,7 @@
 import { useRef, useEffect, forwardRef, useState } from 'react';
 import type { Camera } from '@/src/hooks/useCamera';
 import type { SimulationCharacter } from '@/src/lib/character';
-import { WORLD_CONFIG, CHARACTER_CONFIG } from '@/src/lib/world';
+import { WORLD_CONFIG, CHARACTER_CONFIG, TrapCircle } from '@/src/lib/world';
 import { drawGrid } from '@/src/lib/canvas-utils';
 
 interface WorldCanvasProps {
@@ -18,11 +18,14 @@ interface WorldCanvasProps {
   onMouseMove: (e: MouseEvent) => void;
   onMouseUp: () => void;
   isDragging: boolean;
+  trapCircles: TrapCircle[];
+  onAddTrapCircle: (circle: TrapCircle) => void;
+  onRemoveTrapCircle: (id: string) => void;
 }
 
 export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
   function WorldCanvas(
-    { characters, camera, onWheel, onMouseDown, onMouseMove, onMouseUp, isDragging },
+    { characters, camera, onWheel, onMouseDown, onMouseMove, onMouseUp, isDragging, trapCircles, onAddTrapCircle, onRemoveTrapCircle },
     ref
   ) {
     const internalRef = useRef<HTMLCanvasElement>(null);
@@ -31,13 +34,26 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
     // Track if hovering over a character's interaction radius
     const [isHoveringCharacter, setIsHoveringCharacter] = useState(false);
 
+    // Track drawing state for trap circles (using refs to avoid stale closures)
+    const isDrawingTrapCircleRef = useRef(false);
+    const trapCircleStartRef = useRef<{ x: number; y: number } | null>(null);
+    const currentTrapCircleRadiusRef = useRef(0);
+
+    // Force re-render when drawing state changes (for preview)
+    const [, forceRender] = useState(0);
+
     // Use refs to access latest values without restarting render loop
     const charactersRef = useRef(characters);
     const cameraRef = useRef(camera);
+    const trapCirclesRef = useRef(trapCircles);
 
     useEffect(() => {
       charactersRef.current = characters;
     }, [characters]);
+
+    useEffect(() => {
+      trapCirclesRef.current = trapCircles;
+    }, [trapCircles]);
 
     useEffect(() => {
       cameraRef.current = camera;
@@ -57,13 +73,13 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
       return { x: worldX, y: worldY };
     };
 
-    // Check if a point is within any character's interaction radius
+    // Check if a point is within any character's clickable radius
     const isPointInCharacterRadius = (worldX: number, worldY: number): boolean => {
       for (const character of charactersRef.current) {
         const dx = worldX - character.x;
         const dy = worldY - character.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
-        if (distance <= CHARACTER_CONFIG.INTERACTION_RADIUS) {
+        if (distance <= CHARACTER_CONFIG.CLICKABLE_RADIUS) {
           return true;
         }
       }
@@ -73,13 +89,14 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
     // Get the character at a given world point (returns the closest one if overlapping)
     const getCharacterAtPoint = (worldX: number, worldY: number) => {
       let closestCharacter = null;
-      let closestDistance: number = CHARACTER_CONFIG.INTERACTION_RADIUS;
+      let closestDistance = Infinity;
 
       for (const character of charactersRef.current) {
         const dx = worldX - character.x;
         const dy = worldY - character.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
-        if (distance <= closestDistance) {
+        // Check if within clickable radius and closer than previous
+        if (distance <= CHARACTER_CONFIG.CLICKABLE_RADIUS && distance < closestDistance) {
           closestDistance = distance;
           closestCharacter = character;
         }
@@ -108,14 +125,72 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
       const combinedMouseMove = (e: MouseEvent) => {
         onMouseMove(e);
         handleMouseMoveForHover(e);
+
+        // Handle trap circle drawing preview
+        if (isDrawingTrapCircleRef.current && trapCircleStartRef.current) {
+          const { x, y } = screenToWorld(e.clientX, e.clientY);
+          const dx = x - trapCircleStartRef.current.x;
+          const dy = y - trapCircleStartRef.current.y;
+          currentTrapCircleRadiusRef.current = Math.sqrt(dx * dx + dy * dy);
+          forceRender((n) => n + 1); // Trigger re-render for preview
+        }
       };
 
       const combinedMouseDown = (e: MouseEvent) => {
+        // Ctrl + Left click = start drawing trap circle
+        if (e.ctrlKey && e.button === 0) {
+          e.preventDefault();
+          const { x, y } = screenToWorld(e.clientX, e.clientY);
+          console.log('Starting trap circle at:', x, y);
+          trapCircleStartRef.current = { x, y };
+          isDrawingTrapCircleRef.current = true;
+          currentTrapCircleRadiusRef.current = 0;
+          return; // Don't propagate to other handlers
+        }
+
+        // Ctrl + Right click = delete trap circle at point
+        if (e.ctrlKey && e.button === 2) {
+          e.preventDefault();
+          const { x, y } = screenToWorld(e.clientX, e.clientY);
+          // Find circle that contains this point
+          for (const circle of trapCircles) {
+            const dx = x - circle.x;
+            const dy = y - circle.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist <= circle.radius) {
+              onRemoveTrapCircle(circle.id);
+              return;
+            }
+          }
+          return;
+        }
+
         onMouseDown(e);
         handleMouseDownForClick(e);
       };
 
       const combinedMouseUp = (e: MouseEvent) => {
+        // Finish drawing trap circle
+        if (isDrawingTrapCircleRef.current && trapCircleStartRef.current && currentTrapCircleRadiusRef.current > 20) {
+          const newCircle: TrapCircle = {
+            id: `trap-${Date.now()}`,
+            x: trapCircleStartRef.current.x,
+            y: trapCircleStartRef.current.y,
+            radius: currentTrapCircleRadiusRef.current,
+          };
+          onAddTrapCircle(newCircle);
+        }
+        isDrawingTrapCircleRef.current = false;
+        trapCircleStartRef.current = null;
+        currentTrapCircleRadiusRef.current = 0;
+
+        // Skip character interaction if we were drawing
+        if (e.ctrlKey) {
+          mouseDownPos.current = null;
+          onMouseUp();
+          return;
+        }
+
         // Only trigger if this was a click, not a drag
         if (mouseDownPos.current) {
           const dx = e.clientX - mouseDownPos.current.x;
@@ -226,6 +301,37 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
         // Draw all characters
         for (const character of sortedCharacters) {
           character.draw(ctx);
+        }
+
+        // Draw trap circles
+        const currentTrapCircles = trapCirclesRef.current;
+        for (const circle of currentTrapCircles) {
+          // Draw outer glow
+          ctx.strokeStyle = 'rgba(255, 50, 50, 1)';
+          ctx.lineWidth = 4;
+          ctx.setLineDash([15, 8]);
+          ctx.beginPath();
+          ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          // Draw faint fill
+          ctx.fillStyle = 'rgba(255, 100, 100, 0.15)';
+          ctx.fill();
+        }
+
+        // Draw preview circle while drawing
+        if (isDrawingTrapCircleRef.current && trapCircleStartRef.current && currentTrapCircleRadiusRef.current > 0) {
+          ctx.strokeStyle = 'rgba(255, 200, 100, 0.8)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.arc(trapCircleStartRef.current.x, trapCircleStartRef.current.y, currentTrapCircleRadiusRef.current, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          ctx.fillStyle = 'rgba(255, 200, 100, 0.15)';
+          ctx.fill();
         }
 
         // Restore context state

@@ -5,7 +5,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { PanelRightOpen, Users } from 'lucide-react';
+import { PanelRightOpen, Users, Circle, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Sidebar,
@@ -58,9 +58,11 @@ const suggestions = [
 interface WorldControlsProps {
   onAsk: (question: string) => void;
   characters: Character[];
+  onClearTrapCircles?: () => void;
+  trapCircleCount?: number;
 }
 
-export function WorldControls({ onAsk, characters }: WorldControlsProps) {
+export function WorldControls({ onAsk, characters, onClearTrapCircles, trapCircleCount = 0 }: WorldControlsProps) {
   const [status, setStatus] = useState<'submitted' | 'streaming' | 'ready' | 'error'>('ready');
   const [messages, setMessages] = useState<MessageType[]>([]);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
@@ -147,6 +149,23 @@ export function WorldControls({ onAsk, characters }: WorldControlsProps) {
               <span>{characters.length}</span>
             </div>
           </div>
+          {trapCircleCount > 0 && onClearTrapCircles && (
+            <div className="flex items-center justify-between text-xs">
+              <div className="flex items-center gap-1 text-muted-foreground">
+                <Circle className="size-3" />
+                <span>{trapCircleCount} trap circle{trapCircleCount !== 1 ? 's' : ''}</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onClearTrapCircles}
+                className="h-6 px-2 text-xs text-destructive hover:text-destructive"
+              >
+                <Trash2 className="size-3 mr-1" />
+                Clear
+              </Button>
+            </div>
+          )}
           <TabsList className="w-full h-8 bg-sidebar-accent">
             <TabsTrigger value="chat" className="flex-1 h-7 text-xs font-normal">
               Chat
