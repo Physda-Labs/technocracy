@@ -96,29 +96,6 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
     // Track mouse position for click detection (to distinguish from drag)
     const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
 
-    // Handle click on character to toggle speech bubble
-    const handleClick = (e: MouseEvent) => {
-      // Only trigger if this was a click, not a drag
-      if (mouseDownPos.current) {
-        const dx = e.clientX - mouseDownPos.current.x;
-        const dy = e.clientY - mouseDownPos.current.y;
-        const dragDistance = Math.sqrt(dx * dx + dy * dy);
-
-        // If dragged more than 5 pixels, it's a drag not a click
-        if (dragDistance > 5) {
-          mouseDownPos.current = null;
-          return;
-        }
-      }
-
-      const { x, y } = screenToWorld(e.clientX, e.clientY);
-      const character = getCharacterAtPoint(x, y);
-      if (character) {
-        character.toggleSpeechBubble();
-      }
-      mouseDownPos.current = null;
-    };
-
     const handleMouseDownForClick = (e: MouseEvent) => {
       mouseDownPos.current = { x: e.clientX, y: e.clientY };
     };
@@ -139,8 +116,34 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
       };
 
       const combinedMouseUp = (e: MouseEvent) => {
-        handleClick(e);
+        // Only trigger if this was a click, not a drag
+        if (mouseDownPos.current) {
+          const dx = e.clientX - mouseDownPos.current.x;
+          const dy = e.clientY - mouseDownPos.current.y;
+          const dragDistance = Math.sqrt(dx * dx + dy * dy);
+
+          // If dragged more than 5 pixels, it's a drag not a click
+          if (dragDistance <= 5) {
+            const { x, y } = screenToWorld(e.clientX, e.clientY);
+            const character = getCharacterAtPoint(x, y);
+            if (character) {
+              if (e.button === 0) {
+                // Left click - toggle speech bubble
+                character.toggleSpeechBubble();
+              } else if (e.button === 2) {
+                // Right click - toggle sit
+                character.toggleSit();
+              }
+            }
+          }
+        }
+        mouseDownPos.current = null;
         onMouseUp();
+      };
+
+      // Prevent context menu on right click
+      const preventContextMenu = (e: MouseEvent) => {
+        e.preventDefault();
       };
 
       canvas.addEventListener('wheel', onWheel, { passive: false });
@@ -148,6 +151,7 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
       canvas.addEventListener('mousemove', combinedMouseMove);
       canvas.addEventListener('mouseup', combinedMouseUp);
       canvas.addEventListener('mouseleave', onMouseUp);
+      canvas.addEventListener('contextmenu', preventContextMenu);
 
       return () => {
         canvas.removeEventListener('wheel', onWheel);
@@ -155,6 +159,7 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
         canvas.removeEventListener('mousemove', combinedMouseMove);
         canvas.removeEventListener('mouseup', combinedMouseUp);
         canvas.removeEventListener('mouseleave', onMouseUp);
+        canvas.removeEventListener('contextmenu', preventContextMenu);
       };
     }, [canvasRef, onWheel, onMouseDown, onMouseMove, onMouseUp]);
 

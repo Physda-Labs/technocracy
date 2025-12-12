@@ -44,6 +44,7 @@ export enum Direction {
 export enum CharacterState {
   WANDERING = 'WANDERING',
   TALKING = 'TALKING',
+  SITTING = 'SITTING',
 }
 
 /**

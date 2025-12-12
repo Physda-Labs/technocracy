@@ -36,9 +36,15 @@ export class SimulationCharacter {
   speechBubbleHidden: boolean = false; // Toggle to hide/show speech bubble
   pendingSpeechTimeout: NodeJS.Timeout | null = null;
 
-  // Sprite image
+  // Sprite images
   image: HTMLImageElement | null = null;
   imageLoaded: boolean = false;
+  sitImage: HTMLImageElement | null = null;
+  sitImageLoaded: boolean = false;
+
+  // Saved velocity when sitting
+  savedVx: number = 0;
+  savedVy: number = 0;
 
   constructor(characterData: CharacterData, x: number, y: number, vx: number, vy: number) {
     this.id = characterData.id.toString();
@@ -72,18 +78,46 @@ export class SimulationCharacter {
 
     // Use the walk sprite from the character data
     this.image.src = this.data.sprites.walk.url;
+
+    // Load sit sprite
+    this.loadSitImage();
+  }
+
+  /**
+   * Load the character's sit sprite
+   */
+  private loadSitImage(): void {
+    this.sitImage = new Image();
+    this.sitImage.crossOrigin = 'anonymous';
+
+    this.sitImage.onload = () => {
+      this.sitImageLoaded = true;
+    };
+
+    this.sitImage.onerror = (error) => {
+      console.error(`Failed to load sit sprite for character ${this.id}:`, error);
+      this.sitImageLoaded = false;
+    };
+
+    // Use the sit sprite from the character data
+    if (this.data.sprites.sit?.url) {
+      this.sitImage.src = this.data.sprites.sit.url;
+    }
   }
 
   /**
    * Update character position and state
    */
   update(deltaTime: number = 1, allCharacters: SimulationCharacter[] = []): void {
-    // Update speech timer
-    if (this.state === CharacterState.TALKING) {
+    // Update speech timer (independent of movement state)
+    if (this.speechTimer > 0) {
       this.speechTimer -= deltaTime * 16.67; // Approximate ms per frame at 60fps
       if (this.speechTimer <= 0) {
-        this.state = CharacterState.WANDERING;
         this.speechText = '';
+        // Only return to wandering if we were talking (not sitting)
+        if (this.state === CharacterState.TALKING) {
+          this.state = CharacterState.WANDERING;
+        }
       }
     }
 
@@ -103,6 +137,11 @@ export class SimulationCharacter {
    * Move the character and handle world boundaries
    */
   private move(): void {
+    // Don't move if sitting
+    if (this.state === CharacterState.SITTING) {
+      return;
+    }
+
     // Update position
     this.x += this.vx;
     this.y += this.vy;
@@ -189,10 +228,33 @@ export class SimulationCharacter {
       this.pendingSpeechTimeout = null;
     }
 
-    // Immediate response
+    // Set speech text and timer
     this.speechText = getRandomResponse();
     this.speechTimer = SPEECH_CONFIG.DURATION_MS;
-    this.state = CharacterState.TALKING;
+
+    // Only change state to TALKING if not sitting
+    if (this.state !== CharacterState.SITTING) {
+      this.state = CharacterState.TALKING;
+    }
+  }
+
+  /**
+   * Toggle sitting state - right click to sit/stand
+   */
+  toggleSit(): void {
+    if (this.state === CharacterState.SITTING) {
+      // Stand up - restore velocity
+      this.state = CharacterState.WANDERING;
+      this.vx = this.savedVx;
+      this.vy = this.savedVy;
+    } else {
+      // Sit down - save velocity and stop
+      this.savedVx = this.vx;
+      this.savedVy = this.vy;
+      this.vx = 0;
+      this.vy = 0;
+      this.state = CharacterState.SITTING;
+    }
   }
 
   /**
@@ -237,25 +299,41 @@ export class SimulationCharacter {
     // Draw shadow
     drawShadow(ctx, this.x, this.y, currentW);
 
-    // Draw sprite
+    // Draw sprite based on state
     try {
-      drawSprite(
-        ctx,
-        this.image,
-        this.frameIndex,
-        this.row,
-        this.x,
-        this.y,
-        currentW,
-        currentH
-      );
+      if (this.state === CharacterState.SITTING && this.sitImageLoaded && this.sitImage) {
+        // Draw sitting sprite - use specific frame (row 2, col 2 in 0-indexed = facing screen)
+        // Sit sprite is 3 columns x 4 rows
+        const sitFrameW = this.sitImage.width / 3;
+        const sitFrameH = this.sitImage.height / 4;
+        const sitCol = 1; // Column 3 (0-indexed = 2)
+        const sitRow = 2; // Row 3 (0-indexed = 2)
+
+        ctx.drawImage(
+          this.sitImage,
+          sitCol * sitFrameW, sitRow * sitFrameH, sitFrameW, sitFrameH,
+          this.x - currentW / 2, this.y - currentH / 2, currentW, currentH
+        );
+      } else {
+        // Draw walk sprite
+        drawSprite(
+          ctx,
+          this.image,
+          this.frameIndex,
+          this.row,
+          this.x,
+          this.y,
+          currentW,
+          currentH
+        );
+      }
     } catch (error) {
       // Silently fail if sprite drawing fails
       console.error('Error drawing sprite:', error);
     }
 
-    // Draw speech bubble if talking and not hidden
-    if (this.state === CharacterState.TALKING && this.speechText && !this.speechBubbleHidden) {
+    // Draw speech bubble if has speech text and not hidden (independent of movement state)
+    if (this.speechText && !this.speechBubbleHidden) {
       drawSpeechBubble(ctx, this.x, this.y - currentH / 2, this.speechText, 12);
     }
 
