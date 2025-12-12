@@ -33,6 +33,7 @@ export class SimulationCharacter {
   state: CharacterState = CharacterState.WANDERING;
   speechText: string = '';
   speechTimer: number = 0;
+  speechBubbleHidden: boolean = false; // Toggle to hide/show speech bubble
   pendingSpeechTimeout: NodeJS.Timeout | null = null;
 
   // Sprite image
@@ -195,6 +196,13 @@ export class SimulationCharacter {
   }
 
   /**
+   * Toggle the speech bubble visibility
+   */
+  toggleSpeechBubble(): void {
+    this.speechBubbleHidden = !this.speechBubbleHidden;
+  }
+
+  /**
    * Draw the character on the canvas
    */
   draw(ctx: CanvasRenderingContext2D): void {
@@ -207,6 +215,24 @@ export class SimulationCharacter {
     }
 
     ctx.save();
+
+    // Draw hitbox visualization (for debugging)
+    ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]); // Dotted line pattern
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, CHARACTER_CONFIG.HITBOX_RADIUS, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]); // Reset line dash
+
+    // Draw interaction radius (red dotted circle)
+    ctx.strokeStyle = 'rgba(163, 45, 45, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]); // Dotted line pattern
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, CHARACTER_CONFIG.INTERACTION_RADIUS, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]); // Reset line dash
 
     // Draw shadow
     drawShadow(ctx, this.x, this.y, currentW);
@@ -228,8 +254,8 @@ export class SimulationCharacter {
       console.error('Error drawing sprite:', error);
     }
 
-    // Draw speech bubble if talking
-    if (this.state === CharacterState.TALKING && this.speechText) {
+    // Draw speech bubble if talking and not hidden
+    if (this.state === CharacterState.TALKING && this.speechText && !this.speechBubbleHidden) {
       drawSpeechBubble(ctx, this.x, this.y - currentH / 2, this.speechText, 12);
     }
 
