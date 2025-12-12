@@ -7,7 +7,7 @@
 import { useRef, useEffect, forwardRef, useState } from 'react';
 import type { Camera } from '@/src/hooks/useCamera';
 import type { SimulationCharacter } from '@/src/lib/character';
-import { WORLD_CONFIG, CHARACTER_CONFIG, TrapCircle } from '@/src/lib/world';
+import { WORLD_CONFIG, CHARACTER_CONFIG, TrapCircle, CharacterState } from '@/src/lib/world';
 import { drawGrid } from '@/src/lib/canvas-utils';
 
 interface WorldCanvasProps {
@@ -21,11 +21,14 @@ interface WorldCanvasProps {
   trapCircles: TrapCircle[];
   onAddTrapCircle: (circle: TrapCircle) => void;
   onRemoveTrapCircle: (id: string) => void;
+  onEndInteraction: (character: SimulationCharacter) => void;
+  showInteractionRadius: boolean;
+  showTrapCircles: boolean;
 }
 
 export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
   function WorldCanvas(
-    { characters, camera, onWheel, onMouseDown, onMouseMove, onMouseUp, isDragging, trapCircles, onAddTrapCircle, onRemoveTrapCircle },
+    { characters, camera, onWheel, onMouseDown, onMouseMove, onMouseUp, isDragging, trapCircles, onAddTrapCircle, onRemoveTrapCircle, onEndInteraction, showInteractionRadius, showTrapCircles },
     ref
   ) {
     const internalRef = useRef<HTMLCanvasElement>(null);
@@ -46,6 +49,8 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
     const charactersRef = useRef(characters);
     const cameraRef = useRef(camera);
     const trapCirclesRef = useRef(trapCircles);
+    const showInteractionRadiusRef = useRef(showInteractionRadius);
+    const showTrapCirclesRef = useRef(showTrapCircles);
 
     useEffect(() => {
       charactersRef.current = characters;
@@ -58,6 +63,14 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
     useEffect(() => {
       cameraRef.current = camera;
     }, [camera]);
+
+    useEffect(() => {
+      showInteractionRadiusRef.current = showInteractionRadius;
+    }, [showInteractionRadius]);
+
+    useEffect(() => {
+      showTrapCirclesRef.current = showTrapCircles;
+    }, [showTrapCircles]);
 
     // Convert screen coordinates to world coordinates
     const screenToWorld = (screenX: number, screenY: number) => {
@@ -141,7 +154,6 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
         if (e.ctrlKey && e.button === 0) {
           e.preventDefault();
           const { x, y } = screenToWorld(e.clientX, e.clientY);
-          console.log('Starting trap circle at:', x, y);
           trapCircleStartRef.current = { x, y };
           isDrawingTrapCircleRef.current = true;
           currentTrapCircleRadiusRef.current = 0;
@@ -158,6 +170,21 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
             const dy = y - circle.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             if (dist <= circle.radius) {
+              // If this is an interaction circle, end the interaction too
+              if (circle.id.startsWith('interaction-')) {
+                // Find characters in INTERACTING state within this circle and end their interaction
+                for (const character of charactersRef.current) {
+                  if (character.state === CharacterState.INTERACTING) {
+                    const charDx = character.x - circle.x;
+                    const charDy = character.y - circle.y;
+                    const charDist = Math.sqrt(charDx * charDx + charDy * charDy);
+                    if (charDist <= circle.radius) {
+                      onEndInteraction(character);
+                      break; // onEndInteraction ends both characters
+                    }
+                  }
+                }
+              }
               onRemoveTrapCircle(circle.id);
               return;
             }
@@ -202,7 +229,12 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
             const { x, y } = screenToWorld(e.clientX, e.clientY);
             const character = getCharacterAtPoint(x, y);
             if (character) {
-              if (e.button === 0) {
+              if (e.shiftKey && e.button === 0) {
+                // Shift + Left click - end interaction if character is interacting
+                if (character.state === CharacterState.INTERACTING) {
+                  onEndInteraction(character);
+                }
+              } else if (e.button === 0) {
                 // Left click - toggle speech bubble
                 character.toggleSpeechBubble();
               } else if (e.button === 2) {
@@ -300,24 +332,26 @@ export const WorldCanvas = forwardRef<HTMLCanvasElement, WorldCanvasProps>(
 
         // Draw all characters
         for (const character of sortedCharacters) {
-          character.draw(ctx);
+          character.draw(ctx, showInteractionRadiusRef.current);
         }
 
-        // Draw trap circles
-        const currentTrapCircles = trapCirclesRef.current;
-        for (const circle of currentTrapCircles) {
-          // Draw outer glow
-          ctx.strokeStyle = 'rgba(255, 50, 50, 1)';
-          ctx.lineWidth = 4;
-          ctx.setLineDash([15, 8]);
-          ctx.beginPath();
-          ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.setLineDash([]);
+        // Draw trap circles (if toggle is on)
+        if (showTrapCirclesRef.current) {
+          const currentTrapCircles = trapCirclesRef.current;
+          for (const circle of currentTrapCircles) {
+            // Draw outer glow
+            ctx.strokeStyle = 'rgba(255, 50, 50, 1)';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([15, 8]);
+            ctx.beginPath();
+            ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
 
-          // Draw faint fill
-          ctx.fillStyle = 'rgba(255, 100, 100, 0.15)';
-          ctx.fill();
+            // Draw faint fill
+            ctx.fillStyle = 'rgba(255, 100, 100, 0.15)';
+            ctx.fill();
+          }
         }
 
         // Draw preview circle while drawing

@@ -42,10 +42,34 @@ export class SimulationCharacter {
   imageLoaded: boolean = false;
   sitImage: HTMLImageElement | null = null;
   sitImageLoaded: boolean = false;
+  idleImage: HTMLImageElement | null = null;
+  idleImageLoaded: boolean = false;
 
-  // Saved velocity when sitting
+  // Saved velocity when sitting or interacting
   savedVx: number = 0;
   savedVy: number = 0;
+
+  // Saved position when interacting (to restore after - NOT used anymore, kept for compatibility)
+  savedX: number = 0;
+  savedY: number = 0;
+
+  // Interaction partner (when in INTERACTING state)
+  interactionPartner: SimulationCharacter | null = null;
+
+  // All participants in this interaction (for group interactions)
+  interactionGroup: SimulationCharacter[] = [];
+
+  // Circle center for this interaction (for joining characters)
+  interactionCircleX: number = 0;
+  interactionCircleY: number = 0;
+
+  // Interaction role: 'dominant' (higher aura, stands) or 'submissive' (lower aura, sits)
+  interactionRole: 'dominant' | 'submissive' | null = null;
+
+  // Target position for walking to interaction
+  interactionTargetX: number = 0;
+  interactionTargetY: number = 0;
+  walkingToInteraction: boolean = false;
 
   // Aura determines interaction radius (0-1, randomly assigned)
   aura: number;
@@ -117,6 +141,31 @@ export class SimulationCharacter {
     if (this.data.sprites.sit?.url) {
       this.sitImage.src = this.data.sprites.sit.url;
     }
+
+    // Load idle sprite
+    this.loadIdleImage();
+  }
+
+  /**
+   * Load the character's idle sprite
+   */
+  private loadIdleImage(): void {
+    this.idleImage = new Image();
+    this.idleImage.crossOrigin = 'anonymous';
+
+    this.idleImage.onload = () => {
+      this.idleImageLoaded = true;
+    };
+
+    this.idleImage.onerror = (error) => {
+      console.error(`Failed to load idle sprite for character ${this.id}:`, error);
+      this.idleImageLoaded = false;
+    };
+
+    // Use the idle sprite from the character data
+    if (this.data.sprites.idle?.url) {
+      this.idleImage.src = this.data.sprites.idle.url;
+    }
   }
 
   /**
@@ -153,6 +202,42 @@ export class SimulationCharacter {
   private move(trapCircles: TrapCircle[] = []): void {
     // Don't move if sitting
     if (this.state === CharacterState.SITTING) {
+      return;
+    }
+
+    // Handle walking to interaction position
+    if (this.state === CharacterState.INTERACTING && this.walkingToInteraction) {
+      const dx = this.interactionTargetX - this.x;
+      const dy = this.interactionTargetY - this.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance < 3) {
+        // Arrived at target position
+        this.x = this.interactionTargetX;
+        this.y = this.interactionTargetY;
+        this.walkingToInteraction = false;
+        this.vx = 0;
+        this.vy = 0;
+      } else {
+        // Walk toward target at normal speed
+        const speed = CHARACTER_CONFIG.SPEED * 1.5; // Slightly faster walk
+        this.vx = (dx / distance) * speed;
+        this.vy = (dy / distance) * speed;
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Update facing direction based on movement
+        if (Math.abs(this.vx) > Math.abs(this.vy)) {
+          this.row = this.vx > 0 ? Direction.RIGHT : Direction.LEFT;
+        } else {
+          this.row = this.vy > 0 ? Direction.DOWN : Direction.UP;
+        }
+      }
+      return;
+    }
+
+    // Don't move if interacting (and not walking)
+    if (this.state === CharacterState.INTERACTING) {
       return;
     }
 
@@ -277,8 +362,8 @@ export class SimulationCharacter {
     this.speechText = getRandomResponse();
     this.speechTimer = SPEECH_CONFIG.DURATION_MS;
 
-    // Only change state to TALKING if not sitting
-    if (this.state !== CharacterState.SITTING) {
+    // Only change state to TALKING if not sitting or interacting
+    if (this.state !== CharacterState.SITTING && this.state !== CharacterState.INTERACTING) {
       this.state = CharacterState.TALKING;
     }
   }
@@ -310,9 +395,146 @@ export class SimulationCharacter {
   }
 
   /**
+   * Start interaction with another character
+   * Returns the midpoint position for creating a trap circle
+   */
+  startInteraction(partner: SimulationCharacter): { x: number; y: number; radius: number } | null {
+    // Don't interact if already interacting
+    if (this.state === CharacterState.INTERACTING || partner.state === CharacterState.INTERACTING) {
+      return null;
+    }
+
+    // Determine who is dominant (higher aura) and submissive (lower aura)
+    const isDominant = this.aura >= partner.aura;
+    const dominant = isDominant ? this : partner;
+    const submissive = isDominant ? partner : this;
+
+    // Save velocities (for restoration when interaction ends)
+    this.savedVx = this.vx;
+    this.savedVy = this.vy;
+    partner.savedVx = partner.vx;
+    partner.savedVy = partner.vy;
+
+    // Calculate midpoint and radius for trap circle
+    const midX = (this.x + partner.x) / 2;
+    const midY = (this.y + partner.y) / 2;
+    const radius = 150; // Fixed radius for interaction circle
+
+    // Set target positions (characters will walk there):
+    // Dominant (higher aura): right edge of circle
+    dominant.interactionTargetX = midX + radius - 20;
+    dominant.interactionTargetY = midY;
+
+    // Submissive (lower aura): left side of circle (further from dominant)
+    submissive.interactionTargetX = midX - 25;
+    submissive.interactionTargetY = midY;
+
+    // Set state and partner reference
+    this.state = CharacterState.INTERACTING;
+    partner.state = CharacterState.INTERACTING;
+    this.interactionPartner = partner;
+    partner.interactionPartner = this;
+
+    // Set interaction roles and walking flag
+    dominant.interactionRole = 'dominant';
+    submissive.interactionRole = 'submissive';
+    this.walkingToInteraction = true;
+    partner.walkingToInteraction = true;
+
+    // Set circle center for joining characters
+    this.interactionCircleX = midX;
+    this.interactionCircleY = midY;
+    partner.interactionCircleX = midX;
+    partner.interactionCircleY = midY;
+
+    // Set interaction group
+    this.interactionGroup = [this, partner];
+    partner.interactionGroup = [this, partner];
+
+    return { x: midX, y: midY, radius };
+  }
+
+  /**
+   * End interaction with partner
+   */
+  endInteraction(): void {
+    if (this.state !== CharacterState.INTERACTING) return;
+
+    // End interaction for all group members
+    const group = [...this.interactionGroup];
+
+    for (const member of group) {
+      member.state = CharacterState.WANDERING;
+      member.vx = member.savedVx;
+      member.vy = member.savedVy;
+      member.interactionPartner = null;
+      member.interactionRole = null;
+      member.walkingToInteraction = false;
+      member.interactionGroup = [];
+      member.interactionCircleX = 0;
+      member.interactionCircleY = 0;
+    }
+  }
+
+  /**
+   * Join an existing interaction (for third+ characters)
+   * Returns true if successfully joined
+   */
+  joinInteraction(existingMember: SimulationCharacter): boolean {
+    if (this.state !== CharacterState.WANDERING) return false;
+    if (existingMember.state !== CharacterState.INTERACTING) return false;
+
+    // Save velocities
+    this.savedVx = this.vx;
+    this.savedVy = this.vy;
+
+    // Count current submissive members to calculate position
+    const submissiveCount = existingMember.interactionGroup.filter(
+      m => m.interactionRole === 'submissive'
+    ).length;
+
+    // Set target position: sit next to existing sitting character(s)
+    // Each new joiner sits slightly behind and to the left
+    const circleX = existingMember.interactionCircleX;
+    const circleY = existingMember.interactionCircleY;
+
+    this.interactionTargetX = circleX - 5 - (submissiveCount * 20);
+    this.interactionTargetY = circleY + (submissiveCount * 30); // Offset down for each joiner
+
+    // Set state
+    this.state = CharacterState.INTERACTING;
+    this.interactionRole = 'submissive'; // Joiners always sit
+    this.walkingToInteraction = true;
+    this.interactionCircleX = circleX;
+    this.interactionCircleY = circleY;
+
+    // Add to all group members
+    const newGroup = [...existingMember.interactionGroup, this];
+    for (const member of newGroup) {
+      member.interactionGroup = newGroup;
+    }
+    this.interactionGroup = newGroup;
+
+    // Set partner to the dominant member
+    const dominant = existingMember.interactionGroup.find(m => m.interactionRole === 'dominant');
+    if (dominant) {
+      this.interactionPartner = dominant;
+    }
+
+    return true;
+  }
+
+  /**
+   * Check if this character can interact with others (not already busy)
+   */
+  canInteract(): boolean {
+    return this.state === CharacterState.WANDERING || this.state === CharacterState.SITTING;
+  }
+
+  /**
    * Draw the character on the canvas
    */
-  draw(ctx: CanvasRenderingContext2D): void {
+  draw(ctx: CanvasRenderingContext2D, showInteractionRadius: boolean = true): void {
     const currentW = CHARACTER_CONFIG.WIDTH;
     const currentH = CHARACTER_CONFIG.HEIGHT;
 
@@ -333,13 +555,15 @@ export class SimulationCharacter {
     ctx.setLineDash([]); // Reset line dash
 
     // Draw interaction radius (red dotted circle) - size based on aura
-    ctx.strokeStyle = 'rgba(163, 45, 45, 0.5)';
-    ctx.lineWidth = 3;
-    ctx.setLineDash([5, 5]); // Dotted line pattern
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.interactionRadius, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]); // Reset line dash
+    if (showInteractionRadius) {
+      ctx.strokeStyle = 'rgba(163, 45, 45, 0.5)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([5, 5]); // Dotted line pattern
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.interactionRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]); // Reset line dash
+    }
 
     // Draw shadow
     drawShadow(ctx, this.x, this.y, currentW);
@@ -347,11 +571,11 @@ export class SimulationCharacter {
     // Draw sprite based on state
     try {
       if (this.state === CharacterState.SITTING && this.sitImageLoaded && this.sitImage) {
-        // Draw sitting sprite - use specific frame (row 2, col 2 in 0-indexed = facing screen)
+        // Draw sitting sprite - use specific frame (row 2, col 1 in 0-indexed)
         // Sit sprite is 3 columns x 4 rows
         const sitFrameW = this.sitImage.width / 3;
         const sitFrameH = this.sitImage.height / 4;
-        const sitCol = 1; // Column 3 (0-indexed = 2)
+        const sitCol = 1; // Column 2 (0-indexed = 1)
         const sitRow = 2; // Row 3 (0-indexed = 2)
 
         ctx.drawImage(
@@ -359,6 +583,55 @@ export class SimulationCharacter {
           sitCol * sitFrameW, sitRow * sitFrameH, sitFrameW, sitFrameH,
           this.x - currentW / 2, this.y - currentH / 2, currentW, currentH
         );
+      } else if (this.state === CharacterState.INTERACTING) {
+        // If still walking to position, use walk animation
+        if (this.walkingToInteraction) {
+          drawSprite(
+            ctx,
+            this.image,
+            this.frameIndex,
+            this.row,
+            this.x,
+            this.y,
+            currentW,
+            currentH
+          );
+        } else if (this.interactionRole === 'dominant' && this.idleImageLoaded && this.idleImage) {
+          // Dominant (higher aura): idle sprite, row 2 col 1 (0-indexed: row 1, col 0)
+          // Idle sprite is 2 columns x 4 rows
+          const idleFrameW = this.idleImage.width / 2;
+          const idleFrameH = this.idleImage.height / 4;
+          const idleCol = 0; // Column 1 (0-indexed = 0)
+          const idleRow = 1; // Row 2 (0-indexed = 1) - facing left
+
+          ctx.drawImage(
+            this.idleImage,
+            idleCol * idleFrameW, idleRow * idleFrameH, idleFrameW, idleFrameH,
+            this.x - currentW / 2, this.y - currentH / 2, currentW, currentH
+          );
+        } else if (this.interactionRole === 'submissive' && this.sitImageLoaded && this.sitImage) {
+          // Submissive (lower aura): sit sprite, row 4 col 1 (0-indexed: row 3, col 0)
+          // Sit sprite is 3 columns x 4 rows
+          const sitFrameW = this.sitImage.width / 3;
+          const sitFrameH = this.sitImage.height / 4;
+          const sitCol = 0; // Column 1 (0-indexed = 0)
+          const sitRow = 3; // Row 4 (0-indexed = 3) - facing right
+
+          ctx.drawImage(
+            this.sitImage,
+            sitCol * sitFrameW, sitRow * sitFrameH, sitFrameW, sitFrameH,
+            this.x - currentW / 2, this.y - currentH / 2, currentW, currentH
+          );
+        } else if (this.idleImageLoaded && this.idleImage) {
+          // Fallback: use idle sprite with current direction
+          const idleFrameW = this.idleImage.width / 2;
+          const idleFrameH = this.idleImage.height / 4;
+          ctx.drawImage(
+            this.idleImage,
+            0, this.row * idleFrameH, idleFrameW, idleFrameH,
+            this.x - currentW / 2, this.y - currentH / 2, currentW, currentH
+          );
+        }
       } else {
         // Draw walk sprite
         drawSprite(

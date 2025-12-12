@@ -60,9 +60,13 @@ interface WorldControlsProps {
   characters: Character[];
   onClearTrapCircles?: () => void;
   trapCircleCount?: number;
+  showInteractionRadius?: boolean;
+  onToggleInteractionRadius?: () => void;
+  showTrapCircles?: boolean;
+  onToggleTrapCircles?: () => void;
 }
 
-export function WorldControls({ onAsk, characters, onClearTrapCircles, trapCircleCount = 0 }: WorldControlsProps) {
+export function WorldControls({ onAsk, characters, onClearTrapCircles, trapCircleCount = 0, showInteractionRadius = true, onToggleInteractionRadius, showTrapCircles = true, onToggleTrapCircles }: WorldControlsProps) {
   const [status, setStatus] = useState<'submitted' | 'streaming' | 'ready' | 'error'>('ready');
   const [messages, setMessages] = useState<MessageType[]>([]);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
@@ -163,6 +167,32 @@ export function WorldControls({ onAsk, characters, onClearTrapCircles, trapCircl
               >
                 <Trash2 className="size-3 mr-1" />
                 Clear
+              </Button>
+            </div>
+          )}
+          {onToggleInteractionRadius && (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Show Interaction Radius</span>
+              <Button
+                variant={showInteractionRadius ? "default" : "outline"}
+                size="sm"
+                onClick={onToggleInteractionRadius}
+                className="h-6 px-2 text-xs"
+              >
+                {showInteractionRadius ? 'On' : 'Off'}
+              </Button>
+            </div>
+          )}
+          {onToggleTrapCircles && (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Show Trap Circles</span>
+              <Button
+                variant={showTrapCircles ? "default" : "outline"}
+                size="sm"
+                onClick={onToggleTrapCircles}
+                className="h-6 px-2 text-xs"
+              >
+                {showTrapCircles ? 'On' : 'Off'}
               </Button>
             </div>
           )}

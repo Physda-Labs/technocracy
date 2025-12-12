@@ -23,6 +23,7 @@ export const CHARACTER_CONFIG = {
   CLICKABLE_RADIUS: 40, // Fixed radius for click/hover detection
   INTERACTION_RADIUS_MIN: 50, // Min visual radius (at aura 0)
   INTERACTION_RADIUS_MAX: 200, // Max visual radius (at aura 1)
+  INTERACTION_CHANCE: 0.001, // 0.5% chance per frame when radii overlap (about 30% per second at 60fps)
   SPEED: 0.5, // Increased from 0.5 for more visible movement
   ANIMATION_SPEED: 0.2, // Increased from 0.15 for smoother animation
   DIRECTION_CHANGE_CHANCE: 0.01, // 1% chance per frame
@@ -55,6 +56,7 @@ export enum CharacterState {
   WANDERING = 'WANDERING',
   TALKING = 'TALKING',
   SITTING = 'SITTING',
+  INTERACTING = 'INTERACTING', // Two characters interacting with each other
 }
 
 /**
